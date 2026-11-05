@@ -2,7 +2,7 @@ import os
 import threading
 from flask import Flask
 
-# Создаем веб-приложение для прохождения проверки портов Render
+# Веб-сервер для прохождения проверки Render
 app = Flask(__name__)
 
 @app.route('/')
@@ -22,7 +22,6 @@ import logging
 import config
 from gemini import GeminiAPI
 
-# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -30,12 +29,9 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Инициализация API Gemini
 gemini_api = GeminiAPI()
 
 class TelegramBot:
-    """Простая реализация Telegram бота с использованием requests"""
-    
     def __init__(self, token):
         self.token = token
         self.api_url = f"https://api.telegram.org/bot{token}/"
@@ -44,12 +40,10 @@ class TelegramBot:
         logger.info(f"Бот @{self.bot_username} успешно запущен для всех чатов")
 
     def get_me(self):
-        """Получение информации о боте"""
         response = requests.get(f"{self.api_url}getMe")
         return response.json().get("result", {})
     
     def get_updates(self, offset=None, timeout=30):
-        """Получение обновлений от Telegram API"""
         params = {"timeout": timeout, "allowed_updates": ["message"]}
         if offset:
             params["offset"] = offset
@@ -57,25 +51,20 @@ class TelegramBot:
         return response.json().get("result", [])
     
     def send_message(self, chat_id, text, message_thread_id=None):
-        """Отправка сообщения"""
         params = {"chat_id": chat_id, "text": text}
         if message_thread_id:
             params["message_thread_id"] = message_thread_id
-        
         response = requests.post(f"{self.api_url}sendMessage", params=params)
         return response.json()
     
     def send_chat_action(self, chat_id, action="typing", message_thread_id=None):
-        """Отправка действия (печатает...)"""
         params = {"chat_id": chat_id, "action": action}
         if message_thread_id:
             params["message_thread_id"] = message_thread_id
-            
         response = requests.post(f"{self.api_url}sendChatAction", params=params)
         return response.json()
     
     def process_message(self, message):
-        """Обработка входящего сообщения"""
         if "text" not in message:
             return
         
@@ -86,32 +75,23 @@ class TelegramBot:
         user_first_name = message.get("from", {}).get("first_name", "Пользователь")
         message_thread_id = message.get("message_thread_id", None)
         
-        # Команда просмотра JSON сообщения
         if text.startswith("/json"):
             json_data = json.dumps(message, indent=2, ensure_ascii=False)
             self.send_message(chat_id, f"```\n{json_data}\n```", message_thread_id)
             return
             
-        # Служебные команды
         if text.startswith("/start"):
             self.send_message(
                 chat_id, 
-                f"Привет! Я бот с Google Gemini AI. Упомяните меня @{self.bot_username} в группе или напишите прямо сюда, чтобы я ответил.", 
+                f"Привет! Я бот с Google Gemini AI. Упомяните меня @{self.bot_username} в группе или напишите прямо сюда.", 
                 message_thread_id
             )
             return
         elif text.startswith("/help"):
-            help_text = (
-                f"Доступные команды:\n"
-                f"/start - Начать работу с ботом\n"
-                f"/help - Справка\n"
-                f"/json - JSON структура сообщения\n\n"
-                f"В группе упомяните @{self.bot_username} или ответьте на мое сообщение, чтобы получить ответ AI."
-            )
+            help_text = f"Упомяните @{self.bot_username} или ответьте на мое сообщение в группе."
             self.send_message(chat_id, help_text, message_thread_id)
             return
 
-        # Проверка условий: ЛС, упоминание через @ или ответ на сообщение бота
         is_private = (chat_type == "private")
         bot_mentioned = f"@{self.bot_username}".lower() in text.lower()
         reply_to_bot = (
@@ -121,22 +101,18 @@ class TelegramBot:
             .lower() == self.bot_username.lower()
         )
 
-        # Если это группа и бота не упомянули / не ответили ему — пропускаем
         if not (is_private or bot_mentioned or reply_to_bot):
             return
 
-        # Очищаем запрос от тега бота
         prompt = text.replace(f"@{self.bot_username}", "").replace(f"@{self.bot_username.lower()}", "").strip()
         
-        # Если отправили только тег бота без текста, но ответили на чье-то сообщение
         if not prompt and "reply_to_message" in message:
             prompt = message["reply_to_message"].get("text", "")
 
         if not prompt:
-            self.send_message(chat_id, "Пожалуйста, напишите вопрос или тему после упоминания.", message_thread_id)
+            self.send_message(chat_id, "Пожалуйста, напишите вопрос после упоминания.", message_thread_id)
             return
 
-        # Отправляем статус "печатает"
         self.send_chat_action(chat_id, "typing", message_thread_id)
         time.sleep(0.5)
 
@@ -147,15 +123,21 @@ class TelegramBot:
             self.send_message(chat_id, response, message_thread_id)
         except Exception as e:
             logger.error(f"Ошибка при запросе к Gemini: {e}")
-            self.send_message(chat_id, "Произошла ошибка при обработке запроса нейросетью. Попробуйте еще раз позже.", message_thread_id)
+            self.send_message(chat_id, "Ошибка нейросети. Попробуйте еще раз.", message_thread_id)
 
-    def main():
-    if not config.TELEGRAM_TOKEN:
-        logger.error("TELEGRAM_TOKEN не найден в переменных окружения!")
-        return
-    
-    bot = TelegramBot(config.TELEGRAM_TOKEN)
-    bot.run()
+    def run(self):
+        logger.info("Запуск бота в режиме long polling...")
+        offset = None
+        while True:
+            try:
+                updates = self.get_updates(offset=offset)
+                for update in updates:
+                    offset = update["update_id"] + 1
+                    if "message" in update:
+                        self.process_message(update["message"])
+            except Exception as e:
+                logger.error(f"Ошибка при обработке обновлений: {e}")
+                time.sleep(3)
 
-if __name__ == "__main__":
-    main()
+bot = TelegramBot(config.TELEGRAM_TOKEN)
+bot.run()
