@@ -3,7 +3,7 @@ import threading
 from flask import Flask
 
 # Создаем веб-приложение
-app = Flask(legendariki)
+app = Flask(__name__)
 
 @app.route('/')
 def home():
