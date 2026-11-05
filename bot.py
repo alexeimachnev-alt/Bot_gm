@@ -50,7 +50,7 @@ def handle_message(message):
 
     try:
         response = ai_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             contents=prompt,
         )
         reply_text = response.text or "Не удалось сформировать ответ."
