@@ -7,19 +7,18 @@ logger = logging.getLogger(__name__)
 class GeminiAPI:
     def __init__(self):
         raw_key = os.environ.get("GEMINI_API_KEY", "")
-        # Очищаем ключ от любых паразитных символов и пробелов
-        self.api_key = raw_key.strip().replace("\n", "").replace("\r", "").replace(" ", "")
-        # Стабильная и быстрая модель Gemini 1.5 Flash
+        # Очищаем ключ от любых пробелов, кавычек и переносов строк
+        self.api_key = raw_key.strip().replace("\n", "").replace("\r", "").replace(" ", "").replace('"', '').replace("'", "")
+        # Рабочий эндпоинт Google Developer API
         self.url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
     def generate_response(self, prompt: str) -> str:
         if not self.api_key:
             return "Ошибка: GEMINI_API_KEY не задан в настройках Render."
 
-        # Для токенов типа AQ передаем оба варианта заголовков
+        # Исключительно x-goog-api-key без заголовка Authorization
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
             "x-goog-api-key": self.api_key
         }
 
