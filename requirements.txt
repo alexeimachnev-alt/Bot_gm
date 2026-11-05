@@ -1,4 +1,4 @@
-requests
-python-dotenv
-google-generativeai
+pyTelegramBotAPI
+google-genai
 flask
+gunicorn
