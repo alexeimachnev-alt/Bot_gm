@@ -7,9 +7,10 @@ logger = logging.getLogger(__name__)
 class GeminiAPI:
     def __init__(self):
         raw_key = os.environ.get("GEMINI_API_KEY", "")
-        # Удаляем пробелы, переносы строк и невидимые символы
+        # Очищаем ключ от возможных пробелов и переносов строк
         self.api_key = raw_key.strip().replace("\n", "").replace("\r", "").replace(" ", "")
-        self.url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.api_key}"
+        # Модель, указанная в ответе Google API
+        self.url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={self.api_key}"
 
     def generate_response(self, prompt: str) -> str:
         if not self.api_key:
