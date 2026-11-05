@@ -1,10 +1,11 @@
 import os
+import time
 import threading
 from flask import Flask
 import telebot
 from google import genai
+from google.genai.errors import APIError
 
-# Чтение ключей из переменных окружения Render
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or "").strip().strip("'\"")
 
@@ -13,11 +14,9 @@ if not TELEGRAM_BOT_TOKEN:
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY не задан в переменных окружения!")
 
-# Инициализация клиентов
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Веб-сервер Flask для поддержания жизни на Render
 app = Flask(__name__)
 
 @app.route("/")
@@ -25,11 +24,43 @@ app = Flask(__name__)
 def health_check():
     return "Bot is alive!", 200
 
-# Обработка сообщений в Telegram
+# Список моделей: если основная перегружена (503), бот мгновенно пробует следующую
+MODELS_TO_TRY = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-preview",
+    "gemini-2.5-pro",
+    "gemini-1.5-flash-latest"
+]
+
+def generate_ai_response(prompt: str) -> str:
+    last_error = None
+    for model_name in MODELS_TO_TRY:
+        try:
+            response = ai_client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
+            if response.text:
+                return response.text
+        except APIError as e:
+            last_error = e
+            # При перегрузке (503) или нехватке слотов (429) сразу пробуем следующую
+            if e.code in [503, 429]:
+                continue
+            break
+        except Exception as e:
+            last_error = e
+            break
+
+    raise last_error or Exception("Не удалось получить ответ от моделей.")
+
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     user_text = message.text or ""
-    bot_username = bot.get_me().username
+    try:
+        bot_username = bot.get_me().username
+    except Exception:
+        bot_username = "Legendariki_chat_bot"
 
     is_private = message.chat.type == "private"
     is_mentioned = f"@{bot_username}" in user_text
@@ -49,19 +80,20 @@ def handle_message(message):
     bot.send_chat_action(message.chat.id, "typing")
 
     try:
-        response = ai_client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=prompt,
-        )
-        reply_text = response.text or "Не удалось сформировать ответ."
+        reply_text = generate_ai_response(prompt)
         bot.reply_to(message, reply_text)
     except Exception as e:
-        bot.reply_to(message, f"Ошибка при обращении к нейросети: {e}")
+        bot.reply_to(message, f"Сервера временно перегружены, попробуйте через 10 секунд. ({e})")
 
-# Фоновый запуск Telegram Polling
 def run_telebot():
     print("Telegram polling запущен...")
-    bot.infinity_polling(skip_pending=True)
+    # Бесконечный рестарт при любых сбоях сети Telegram
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=1, timeout=20)
+        except Exception as e:
+            print(f"Ошибка polling: {e}. Перезапуск через 3 сек...")
+            time.sleep(3)
 
 if __name__ == "__main__":
     t = threading.Thread(target=run_telebot, daemon=True)
