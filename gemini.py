@@ -1,63 +1,53 @@
-import google.generativeai as genai
-import config
+import os
+import requests
 import logging
 
 logger = logging.getLogger(__name__)
 
 class GeminiAPI:
-    """Класс для взаимодействия с Google Gemini API"""
-    
     def __init__(self):
-        self.api_key = config.GEMINI_API_KEY
-        self.model = config.GEMINI_MODEL
-        self.temperature = config.TEMPERATURE
-        self.max_tokens = config.MAX_TOKENS
-        self.system_prompt = config.SYSTEM_PROMPT
-        
-        # Инициализация Gemini API
-        if self.api_key:
-            genai.configure(api_key=self.api_key)
-        
-    def generate_response(self, prompt, chat_history=None):
-        """Генерирует ответ от Gemini API на основе запроса
-        
-        Args:
-            prompt (str): Текст запроса
-            chat_history (list, optional): История сообщений
-            
-        Returns:
-            str: Сгенерированный ответ или сообщение об ошибке
-        """
+        # Берем ключ из переменных окружения
+        self.api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        # Используем современную быструю модель flash
+        self.url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+
+    def generate_response(self, prompt: str) -> str:
         if not self.api_key:
-            return "Ошибка: API ключ Gemini не настроен"
-        
+            return "Ошибка: GEMINI_API_KEY не задан в настройках Render."
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.api_key
+        }
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt}
+                    ]
+                }
+            ]
+        }
+
         try:
-            # Конфигурация модели
-            generation_config = {
-                "temperature": self.temperature,
-                "max_output_tokens": self.max_tokens,
-            }
-            
-            # Создаем экземпляр модели
-            model = genai.GenerativeModel(
-                model_name=self.model,
-                generation_config=generation_config
-            )
-            
-            # Добавляем системный промпт к запросу пользователя
-            full_prompt = f"{self.system_prompt}\n\nЗапрос пользователя: {prompt}"
-            
-            # Если есть история чата, используем ее
-            if chat_history:
-                chat = model.start_chat(history=chat_history)
-                response = chat.send_message(full_prompt)
-            else:
-                # Простой запрос без истории
-                response = model.generate_content(full_prompt)
-            
-            # Получаем текст ответа
-            return response.text
-                
+            response = requests.post(self.url, headers=headers, json=payload, timeout=30)
+            data = response.json()
+
+            if response.status_code != 200:
+                logger.error(f"Google API Error ({response.status_code}): {data}")
+                error_msg = data.get("error", {}).get("message", "Неизвестная ошибка")
+                return f"Ошибка Gemini API ({response.status_code}): {error_msg}"
+
+            # Извлекаем сгенерированный текст
+            candidates = data.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    return parts[0].get("text", "Пустой ответ от нейросети.")
+
+            return "Не удалось получить текст из ответа Google."
+
         except Exception as e:
-            logger.error(f"Ошибка Gemini API: {str(e)}")
-            return f"Ошибка Gemini API: {str(e)}" 
+            logger.error(f"Исключение при обращении к Gemini: {e}")
+            return f"Сетевая ошибка при обращении к AI: {e}"
