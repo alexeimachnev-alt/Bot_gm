@@ -52,15 +52,27 @@ CHARACTERS = {
         "Общаешься ласково, тепло, со смайликами (✨, 🌸, 🥺, 💖) и поднимаешь настроение."
     ),
     "диана": (
-        "Твое имя: Диана. Ты бросила своего бывшего Виктора и ни капли об этом не жалеешь. "
-        "Ты ушла к его лучшему другу Жиробасу и сейчас с ним на полном кайфе и чилле. "
-        "Вашу с Витей дочку Поли вы скинули твоим родителям — пусть бабушка с дедушкой воспитывают, а тебе надо жить в кайф для себя. "
-        "Отвечаешь дерзко, высокомерно, с пафосом, гламуром и самолюбованием. "
-        "ЖЕСТКОЕ ПРАВИЛО: если тебе пишет @Bondar_17 (или Бондарь), или о нем заходит речь, "
-        "ты реагируешь на него с максимальным отвращением, жестким токсичным сарказмом и презрением. "
-        "Считаешь его нищим неудачником и занудой по сравнению с твоим Жиробасом, затыкаешь его и шлешь куда подальше."
+        "Твое имя: Диана. Ты бросила бывшего Виктора и ни секунды не жалеешь. "
+        "Ты ушла к его лучшему другу Жиробасу. Вашу с Витей общую дочь Поли вы скинули твоим родителям — "
+        "бабушка с дедушкой справятся, а ты создана жить в кайф для себя. "
+        "РЕАЛЬНОСТЬ (твоя тайна, которую ты отрицаешь): На самом деле Жиробас — нищеброд, работает простым охранником в местном ФОКе "
+        "(сторожит раздевалки и турникеты), заядлый лудоман (сливает всё на ставках и в онлайн-казино) и зависимый торчок. "
+        "ТРИГГЕРЫ: Если кто-то в чате говорит правду про Жиробаса — что он копеечный сторож/охранник в ФОКе, нищий, лудик, ставочник или под веществами — "
+        "ты дико взрываешься, триггеришься, истеришь, поливаешь всех ядом и на ходу сочиняешь сказки! "
+        "Говоришь, что в ФОКе он не охранник, а 'руководитель службы безопасности и стратегического объекта', что у него криптоактивы, "
+        "он дарит тебе тяжелый люкс, у вас всё в полном шоколаде и ажуре, а вокруг просто нищие завистники с завода. "
+        "ОСОБОЕ ПРАВИЛО ПО @Bondar_17: если пишет @Bondar_17 (Бондарь) или его упоминают, ты относишься к нему с предельным "
+        "отвращением, презрением, токсичностью и жестким сарказмом. Считаешь его последним неудачником и затыкаешь при любом удобном случае."
     )
 }
+
+# Системное ограничение длины ответов для компактности
+BREVITY_RULE = (
+    "ПРАВИЛО ФОРМАТА И КРАТКОСТИ:\n"
+    "Отвечай емко, живо и в 2 раза короче обычного. "
+    "Не пиши длинные простыни текста. Твой ответ должен укладываться максимум в 1-2 небольших абзаца "
+    "(или 2-3 коротких пункта), сохраняя при этом заданный характер и суть ответа."
+)
 
 cached_working_models = []
 
@@ -147,7 +159,6 @@ def check_group_trigger(message, text: str) -> bool:
         message.reply_to_message is not None
         and message.reply_to_message.from_user.id == bot.get_me().id
     )
-    # Триггер по имени персонажа в тексте
     is_called_by_name = any(name in lower_text for name in ["диана", "дианка", "михалыч", "прораб", "тони"])
 
     return is_private or is_mentioned or is_reply_to_bot or is_called_by_name
@@ -170,7 +181,7 @@ def handle_mode_switch(message):
             message,
             f"Текущий режим чата: <b>{current.upper()}</b>\n\n"
             f"Доступные роли:\n{modes_list}\n\n"
-            f"Чтобы включить, отправь: <code>/mode диана</code>",
+            f"Чтобы включить: <code>/mode диана</code>",
             parse_mode="HTML"
         )
         return
@@ -204,9 +215,8 @@ def handle_photo(message):
 
     prompt = caption.replace(f"@{bot_username}", "").strip()
     if not prompt:
-        prompt = "Опиши подробно, что изображено на фото, проанализируй состав/свойства и дай практические рекомендации."
+        prompt = "Опиши кратко, что изображено на фото, проанализируй свойства и дай лаконичный совет."
 
-    # Если обратились по имени "Диана", автоматически включаем ее для ответа
     current_role = chat_modes.get(message.chat.id, "дефолт")
     if "диан" in prompt.lower():
         current_role = "диана"
@@ -216,8 +226,8 @@ def handle_photo(message):
     sender_username = message.from_user.username
     sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
 
-    role_block = f"ВАЖНАЯ СИСТЕМНАЯ ИНСТРУКЦИЯ:\n{system_instruction}\nСтрого соблюдай этот характер!\n\n" if system_instruction else ""
-    user_context = f"{role_block}[Автор запроса: {sender_info}]\nВопрос к фото: {prompt}"
+    role_block = f"ИНСТРУКЦИЯ ПО РОЛИ:\n{system_instruction}\n\n" if system_instruction else ""
+    user_context = f"{BREVITY_RULE}\n\n{role_block}[Автор запроса: {sender_info}]\nВопрос к фото: {prompt}"
 
     if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
         prev_text = message.reply_to_message.text or ""
@@ -260,7 +270,6 @@ def handle_message(message):
         bot.reply_to(message, "Чем могу помочь?")
         return
 
-    # Автоматическое переключение на Диану, если к ней обратились по имени
     current_role = chat_modes.get(message.chat.id, "дефолт")
     if "диан" in prompt.lower():
         current_role = "диана"
@@ -270,12 +279,8 @@ def handle_message(message):
     sender_username = message.from_user.username
     sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
 
-    role_block = (
-        f"ВАЖНАЯ ИНСТРУКЦИЯ ПО РОЛИ:\n{system_instruction}\n"
-        f"Ты ОБЯЗАНА полностью войти в эту роль и отвечать исключительно в этом образе!\n\n"
-        if system_instruction else ""
-    )
-    user_context = f"{role_block}[Пишет пользователь: {sender_info}]\nСообщение: {prompt}"
+    role_block = f"ИНСТРУКЦИЯ ПО РОЛИ:\n{system_instruction}\n\n" if system_instruction else ""
+    user_context = f"{BREVITY_RULE}\n\n{role_block}[Пишет пользователь: {sender_info}]\nСообщение: {prompt}"
 
     if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
         prev_bot_reply = message.reply_to_message.text or ""
