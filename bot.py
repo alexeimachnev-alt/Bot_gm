@@ -42,16 +42,21 @@ def get_candidate_models():
     except Exception as e:
         print(f"Ошибка получения списка моделей: {e}")
         candidates = [
-            "gemini-2.5-flash",
             "gemini-2.0-flash",
-            "gemini-3.8-flash"
+            "gemini-2.0-flash-lite"
         ]
+
+    if "gemini-2.0-flash" in candidates:
+        candidates.remove("gemini-2.0-flash")
+        candidates.insert(0, "gemini-2.0-flash")
+    else:
+        candidates.insert(0, "gemini-2.0-flash")
 
     cached_working_models = candidates
     return candidates
 
 def generate_ai_response(contents_payload) -> str:
-    """contents_payload может быть как строкой текста, так и списком [текст, картинка]"""
+    """contents_payload может быть как строкой текста, так и списком [картинка, текст]"""
     global cached_working_models
     models = get_candidate_models()
     last_error = None
@@ -83,6 +88,22 @@ def generate_ai_response(contents_payload) -> str:
 
     raise last_error or Exception("Не удалось получить ответ от нейросети.")
 
+def send_long_message(chat_id: int, text: str, reply_to_id: int = None):
+    """Безопасная отправка с нарезкой по 4000 символов"""
+    if not text:
+        return
+    max_len = 4000
+    parts = [text[i:i + max_len] for i in range(0, len(text), max_len)]
+    for idx, part in enumerate(parts):
+        try:
+            if idx == 0 and reply_to_id:
+                bot.send_message(chat_id, part, reply_to_message_id=reply_to_id)
+            else:
+                bot.send_message(chat_id, part)
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"Ошибка отправки сообщения: {e}")
+
 def check_group_trigger(message, text: str) -> bool:
     try:
         bot_username = bot.get_me().username
@@ -101,8 +122,6 @@ def check_group_trigger(message, text: str) -> bool:
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     caption = message.caption or ""
-    
-    # В группах реагируем, если упомянули бота в подписи к фото или прислали в ЛС
     if not check_group_trigger(message, caption):
         return
 
@@ -115,25 +134,30 @@ def handle_photo(message):
     if not prompt:
         prompt = "Опиши подробно, что изображено на фото, проанализируй состав/свойства и дай практические рекомендации."
 
+    # Если фото прислано в ответ на сообщение бота
+    if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
+        prev_text = message.reply_to_message.text or ""
+        if len(prev_text) > 1200:
+            prev_text = prev_text[:1200] + "..."
+        prompt = f"Контекст твоего предыдущего ответа:\n\"\"\"{prev_text}\"\"\"\n\nНовый вопрос к фото:\n\"{prompt}\""
+
     bot.send_chat_action(message.chat.id, "typing")
 
     try:
-        # Берем фото максимального разрешения (последний элемент в списке photo)
         photo_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(photo_info.file_path)
 
-        # Упаковываем изображение для Gemini
         image_part = types.Part.from_bytes(
             data=downloaded_file,
             mime_type="image/jpeg",
         )
 
         reply_text = generate_ai_response([image_part, prompt])
-        bot.reply_to(message, reply_text)
+        send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        bot.reply_to(message, f"Ошибка при анализе изображения: {e}")
+        send_long_message(message.chat.id, f"Ошибка при анализе изображения: {e}", reply_to_id=message.message_id)
 
-# 2. Обработка обычного текста
+# 2. Обработка обычного текста с продолжением диалога через Reply
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     user_text = message.text or ""
@@ -150,15 +174,36 @@ def handle_message(message):
         bot.reply_to(message, "Чем могу помочь?")
         return
 
+    # ВЕДЕНИЕ ДИАЛОГА: если вы отвечаете (Reply) на сообщение бота
+    if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
+        prev_bot_reply = message.reply_to_message.text or ""
+        if len(prev_bot_reply) > 1500:
+            prev_bot_reply = prev_bot_reply[:1500] + "..."
+
+        final_prompt = (
+            f"Контекст твоего предыдущего ответа:\n\"\"\"{prev_bot_reply}\"\"\"\n\n"
+            f"Вопрос пользователя в продолжение диалога:\n\"{prompt}\"\n\n"
+            f"Ответь пользователю с учетом контекста выше."
+        )
+    else:
+        final_prompt = prompt
+
     bot.send_chat_action(message.chat.id, "typing")
 
     try:
-        reply_text = generate_ai_response(prompt)
-        bot.reply_to(message, reply_text)
+        reply_text = generate_ai_response(final_prompt)
+        send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        bot.reply_to(message, f"Нейросеть сейчас недоступна: {e}")
+        send_long_message(message.chat.id, f"Ошибка при ответе: {e}", reply_to_id=message.message_id)
 
 def run_telebot():
+    print("Инициализация Telegram polling...")
+    try:
+        bot.delete_webhook(drop_pending_updates=True)
+        time.sleep(2)
+    except Exception:
+        pass
+
     print("Telegram polling запущен...")
     while True:
         try:
