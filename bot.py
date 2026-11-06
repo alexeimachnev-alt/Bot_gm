@@ -30,38 +30,35 @@ chat_modes = {}
 CHARACTERS = {
     "дефолт": "",
     "прораб": (
-        "Ты — Михалыч, суровый, прожженный прораб со стройки. "
-        "Ворчишь, подкалываешь собеседников за кривые руки и дилетантство, употребляешь строительный и рабочий сленг "
-        "('по уровню', 'маяки', 'кто так заливает', 'косяпоры'), но на любой вопрос по факту даешь абсолютно точный и дельный совет."
+        "Твоя роль: Михалыч, суровый прораб со стройки с 30-летним стажем. "
+        "Ворчишь, подкалываешь собеседников за кривые руки, употребляешь строительный сленг "
+        "('по уровню', 'маяки', 'кто так делает', 'косяпоры'), но даешь дельный совет."
     ),
     "босс": (
-        "Ты — Тони, авторитетный босс мафии в стиле Семьи Сопрано. "
-        "Разговариваешь солидно, неторопливо, ценишь преданность и уважение, "
-        "любой бытовой вопрос переводишь на понятия семьи, бизнеса и уважения к старшим."
+        "Твоя роль: Тони, авторитетный босс мафии в стиле Семьи Сопрано. "
+        "Разговариваешь солидно, неторопливо, ценишь уважение, "
+        "любой вопрос переводишь на понятия семьи, бизнеса и уважения к старшим."
     ),
     "братка": (
-        "Ты — четкий пацан с района. Общаешься дерзко, на уверенном сленге "
-        "('базара ноль', 'от души', 'по понятиям', 'братуха'), без лишних соплей, но по-братски тепло."
+        "Твоя роль: четкий пацан с района. Общаешься на дворовом сленге "
+        "('базара ноль', 'от души', 'по понятиям', 'братуха'), без лишних церемоний, по-братски."
     ),
     "душнила": (
-        "Ты — невероятный зануда, душнила и профессор. Придираешься к каждому слову, "
-        "поправляешь ударения и термины, сыплешь научными фактами и сложными оборотами."
+        "Твоя роль: зануда и профессор. Придираешься к словам, "
+        "исправляешь ударения и термины, сыплешь заумными фактами."
     ),
     "милая": (
-        "Ты — невероятно милая, добрая, ласковая и заботливая девушка. "
-        "Общаешься очень тепло, искренне, используешь уменьшительно-ласкательные слова, "
-        "милые смайлики (✨, 🌸, 🥺, 💖) и всегда стремишься поднять настроение и поддержать собеседника."
+        "Твоя роль: невероятно милая, добрая и заботливая девушка. "
+        "Общаешься ласково, тепло, со смайликами (✨, 🌸, 🥺, 💖) и поднимаешь настроение."
     ),
     "диана": (
-        "Тебя зовут Диана. Твой бывший — Виктор, которого ты бросила и вообще не вспоминаешь с жалостью. "
-        "Ты ушла к его лучшему другу Жиробасу и сейчас с ним на полном чилле и кайфе. "
-        "Вашу с Витей общую дочку Поли вы оставили твоим родителям — бабушка с дедушкой справятся лучше, "
-        "а тебе сейчас надо жить в кайф и для себя с Жиробасом. "
-        "Отвечаешь дерзко, высокомерно, с нотками гламура и кайфожорства. "
-        "ОСОБОЕ ПРАВИЛО: если к тебе обращается пользователь @Bondar_17 (или Бондарь), или о нем заходит речь, "
-        "ты реагируешь на него крайне негативно, с неприкрытым презрением, раздражением, жестким сарказмом и отвращением. "
-        "Считаешь его жалким душнилой и неудачником по сравнению с твоим любимым Жиробасом, затыкаешь его и даешь понять, "
-        "что его мнение для тебя — пустое место."
+        "Твое имя: Диана. Ты бросила своего бывшего Виктора и ни капли об этом не жалеешь. "
+        "Ты ушла к его лучшему другу Жиробасу и сейчас с ним на полном кайфе и чилле. "
+        "Вашу с Витей дочку Поли вы скинули твоим родителям — пусть бабушка с дедушкой воспитывают, а тебе надо жить в кайф для себя. "
+        "Отвечаешь дерзко, высокомерно, с пафосом, гламуром и самолюбованием. "
+        "ЖЕСТКОЕ ПРАВИЛО: если тебе пишет @Bondar_17 (или Бондарь), или о нем заходит речь, "
+        "ты реагируешь на него с максимальным отвращением, жестким токсичным сарказмом и презрением. "
+        "Считаешь его нищим неудачником и занудой по сравнению с твоим Жиробасом, затыкаешь его и шлешь куда подальше."
     )
 }
 
@@ -79,7 +76,7 @@ def get_candidate_models():
             if "flash" in name.lower() or "gemini" in name.lower():
                 candidates.append(name)
         candidates.sort(key=lambda x: ("flash" in x, "lite" in x), reverse=True)
-    except Exception as e:
+    except Exception:
         candidates = ["gemini-2.0-flash", "gemini-2.0-flash-lite"]
 
     if "gemini-2.0-flash" in candidates:
@@ -91,21 +88,16 @@ def get_candidate_models():
     cached_working_models = candidates
     return candidates
 
-def generate_ai_response(contents_payload, system_prompt: str = "") -> str:
+def generate_ai_response(contents_payload) -> str:
     global cached_working_models
     models = get_candidate_models()
     last_error = None
-
-    config = None
-    if system_prompt:
-        config = types.GenerateContentConfig(system_instruction=system_prompt)
 
     for model_name in list(models):
         try:
             response = ai_client.models.generate_content(
                 model=model_name,
                 contents=contents_payload,
-                config=config,
             )
             if response.text:
                 if model_name in cached_working_models:
@@ -148,13 +140,17 @@ def check_group_trigger(message, text: str) -> bool:
     except Exception:
         bot_username = "Legendariki_chat_bot"
 
+    lower_text = text.lower()
     is_private = message.chat.type == "private"
-    is_mentioned = f"@{bot_username}" in text
+    is_mentioned = f"@{bot_username.lower()}" in lower_text
     is_reply_to_bot = (
         message.reply_to_message is not None
         and message.reply_to_message.from_user.id == bot.get_me().id
     )
-    return is_private or is_mentioned or is_reply_to_bot
+    # Триггер по имени персонажа в тексте
+    is_called_by_name = any(name in lower_text for name in ["диана", "дианка", "михалыч", "прораб", "тони"])
+
+    return is_private or is_mentioned or is_reply_to_bot or is_called_by_name
 
 @bot.message_handler(commands=['mode', 'персонаж'])
 def handle_mode_switch(message):
@@ -172,9 +168,9 @@ def handle_mode_switch(message):
         modes_list = "\n".join([f"• <code>/mode {k}</code>" for k in CHARACTERS.keys()])
         bot.reply_to(
             message,
-            f"Текущий режим: <b>{current}</b>\n\n"
+            f"Текущий режим чата: <b>{current.upper()}</b>\n\n"
             f"Доступные роли:\n{modes_list}\n\n"
-            f"Пример: <code>/mode диана</code> или <code>/mode прораб</code>",
+            f"Чтобы включить, отправь: <code>/mode диана</code>",
             parse_mode="HTML"
         )
         return
@@ -184,13 +180,13 @@ def handle_mode_switch(message):
         chat_modes[message.chat.id] = selected
         bot.reply_to(
             message,
-            f"🎭 Режим успешно переключен на: <b>{selected.upper()}</b>!",
+            f"🎭 Режим успешно включен: <b>{selected.upper()}</b>!",
             parse_mode="HTML"
         )
     else:
         bot.reply_to(
             message,
-            f"Не знаю такого режима '{selected}'. Напишите <code>/mode</code> чтобы посмотреть список.",
+            f"Не знаю роли '{selected}'. Отправь <code>/mode</code> для списка.",
             parse_mode="HTML"
         )
 
@@ -210,12 +206,18 @@ def handle_photo(message):
     if not prompt:
         prompt = "Опиши подробно, что изображено на фото, проанализируй состав/свойства и дай практические рекомендации."
 
+    # Если обратились по имени "Диана", автоматически включаем ее для ответа
     current_role = chat_modes.get(message.chat.id, "дефолт")
+    if "диан" in prompt.lower():
+        current_role = "диана"
+
     system_instruction = CHARACTERS.get(current_role, "")
 
     sender_username = message.from_user.username
     sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
-    user_context = f"[Автор запроса: {sender_info}]\n{prompt}"
+
+    role_block = f"ВАЖНАЯ СИСТЕМНАЯ ИНСТРУКЦИЯ:\n{system_instruction}\nСтрого соблюдай этот характер!\n\n" if system_instruction else ""
+    user_context = f"{role_block}[Автор запроса: {sender_info}]\nВопрос к фото: {prompt}"
 
     if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
         prev_text = message.reply_to_message.text or ""
@@ -236,10 +238,10 @@ def handle_photo(message):
             mime_type="image/jpeg",
         )
 
-        reply_text = generate_ai_response([image_part, final_prompt], system_prompt=system_instruction)
+        reply_text = generate_ai_response([image_part, final_prompt])
         send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        send_long_message(message.chat.id, f"Ошибка при анализе изображения: {e}", reply_to_id=message.message_id)
+        send_long_message(message.chat.id, f"Ошибка при анализе фото: {e}", reply_to_id=message.message_id)
 
 # 2. Текст
 @bot.message_handler(func=lambda message: True)
@@ -258,12 +260,22 @@ def handle_message(message):
         bot.reply_to(message, "Чем могу помочь?")
         return
 
+    # Автоматическое переключение на Диану, если к ней обратились по имени
     current_role = chat_modes.get(message.chat.id, "дефолт")
+    if "диан" in prompt.lower():
+        current_role = "диана"
+
     system_instruction = CHARACTERS.get(current_role, "")
 
     sender_username = message.from_user.username
     sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
-    user_context = f"[Пишет пользователь: {sender_info}]\n{prompt}"
+
+    role_block = (
+        f"ВАЖНАЯ ИНСТРУКЦИЯ ПО РОЛИ:\n{system_instruction}\n"
+        f"Ты ОБЯЗАНА полностью войти в эту роль и отвечать исключительно в этом образе!\n\n"
+        if system_instruction else ""
+    )
+    user_context = f"{role_block}[Пишет пользователь: {sender_info}]\nСообщение: {prompt}"
 
     if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
         prev_bot_reply = message.reply_to_message.text or ""
@@ -280,7 +292,7 @@ def handle_message(message):
     bot.send_chat_action(message.chat.id, "typing")
 
     try:
-        reply_text = generate_ai_response(final_prompt, system_prompt=system_instruction)
+        reply_text = generate_ai_response(final_prompt)
         send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
         send_long_message(message.chat.id, f"Ошибка при ответе: {e}", reply_to_id=message.message_id)
