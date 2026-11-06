@@ -25,42 +25,70 @@ app = Flask(__name__)
 def health_check():
     return "Bot is alive!", 200
 
-# Хранилище сессий для диалогов
+# Сессии чатов для сохранения контекста
 chat_sessions = {}
+active_model_name = None
 
-# Актуальные модели 2026 года, поддерживаемые вашим ключом
-ACTIVE_MODELS = [
-    "gemini-3.8-flash",
-    "gemini-3.1-pro-preview"
-]
+def get_best_available_model():
+    """Запрашивает у Google реальный список доступных моделей для вашего ключа"""
+    global active_model_name
+    if active_model_name:
+        return active_model_name
 
-def get_or_create_chat(chat_id: int, model_name: str = "gemini-3.8-flash"):
+    try:
+        models = [m.name.replace("models/", "") for m in ai_client.models.list()]
+        print(f"Доступные модели на аккаунте: {models}")
+        
+        # Приоритет отдаем моделям линейки Flash
+        for name in models:
+            if "3.8-flash" in name or "3.5-flash" in name or "flash" in name:
+                active_model_name = name
+                print(f"Выбрана рабочая модель: {active_model_name}")
+                return active_model_name
+        
+        if models:
+            active_model_name = models[0]
+            return active_model_name
+    except Exception as e:
+        print(f"Не удалось получить список моделей: {e}")
+
+    # Запасной вариант по умолчанию
+    active_model_name = "gemini-3.8-flash"
+    return active_model_name
+
+def get_or_create_chat(chat_id: int):
+    model = get_best_available_model()
     if chat_id not in chat_sessions:
-        chat_sessions[chat_id] = ai_client.chats.create(model=model_name)
+        chat_sessions[chat_id] = ai_client.chats.create(model=model)
     return chat_sessions[chat_id]
 
 def send_to_gemini(chat_id: int, message_payload) -> str:
-    last_error = None
-    for model_name in ACTIVE_MODELS:
+    global active_model_name
+    for attempt in range(2):
         try:
-            chat = get_or_create_chat(chat_id, model_name=model_name)
+            chat = get_or_create_chat(chat_id)
             response = chat.send_message(message_payload)
             if response.text:
                 return response.text
         except APIError as e:
-            last_error = e
+            print(f"Ошибка API: {e.code} - {e.message}")
             chat_sessions.pop(chat_id, None)
-            if e.code in [404, 503, 429]:
-                time.sleep(1.5)
+            
+            # При 404 сбрасываем кэш модели, чтобы скрипт переопределил доступную
+            if e.code == 404:
+                active_model_name = None
+                time.sleep(1)
                 continue
-            break
+            elif e.code in [503, 429]:
+                time.sleep(2)
+                continue
+            raise e
         except Exception as e:
-            last_error = e
             chat_sessions.pop(chat_id, None)
             time.sleep(1)
-            continue
+            raise e
 
-    raise last_error or Exception("Сервис Gemini временно недоступен.")
+    raise Exception("Сервис Gemini временно недоступен. Попробуйте еще раз.")
 
 def send_long_message(chat_id: int, text: str, reply_to_id: int = None):
     if not text:
@@ -153,19 +181,18 @@ def handle_message(message):
 
 def run_telebot():
     print("Инициализация Telegram polling...")
-    # Принудительно освобождаем очередь и сбрасываем старые сокеты
     try:
         bot.delete_webhook(drop_pending_updates=True)
         time.sleep(2)
-    except Exception as e:
-        print(f"Сброс webhook: {e}")
+    except Exception:
+        pass
 
     print("Telegram polling запущен...")
     while True:
         try:
             bot.polling(none_stop=True, interval=1, timeout=20)
         except Exception as e:
-            print(f"Сбой polling: {e}. Перезапуск через 3 сек...")
+            print(f"Сбой polling: {e}. Рестарт через 3 сек...")
             time.sleep(3)
 
 if __name__ == "__main__":
