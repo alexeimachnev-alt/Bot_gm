@@ -1,6 +1,8 @@
 import os
 import time
 import threading
+from datetime import datetime
+import pytz
 from flask import Flask
 import telebot
 from google import genai
@@ -25,6 +27,20 @@ app = Flask(__name__)
 def health_check():
     return "Bot is alive!", 200
 
+# Буфер сообщений за день по чатам: { chat_id: ["Имя: текст", ...] }
+daily_chat_logs = {}
+MAX_DAY_MESSAGES = 400  # лимит сообщений, чтобы не перегружать контекст
+
+def log_message(chat_id: int, user_name: str, text: str):
+    if chat_id not in daily_chat_logs:
+        daily_chat_logs[chat_id] = []
+    # Сохраняем без спама служебными командами
+    if text and not text.startswith("/"):
+        clean_entry = f"{user_name}: {text.strip()}"
+        daily_chat_logs[chat_id].append(clean_entry)
+        if len(daily_chat_logs[chat_id]) > MAX_DAY_MESSAGES:
+            daily_chat_logs[chat_id].pop(0)
+
 cached_working_models = []
 
 def get_candidate_models():
@@ -40,11 +56,7 @@ def get_candidate_models():
                 candidates.append(name)
         candidates.sort(key=lambda x: ("flash" in x, "lite" in x), reverse=True)
     except Exception as e:
-        print(f"Ошибка получения списка моделей: {e}")
-        candidates = [
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite"
-        ]
+        candidates = ["gemini-2.0-flash", "gemini-2.0-flash-lite"]
 
     if "gemini-2.0-flash" in candidates:
         candidates.remove("gemini-2.0-flash")
@@ -56,7 +68,6 @@ def get_candidate_models():
     return candidates
 
 def generate_ai_response(contents_payload) -> str:
-    """contents_payload может быть как строкой текста, так и списком [картинка, текст]"""
     global cached_working_models
     models = get_candidate_models()
     last_error = None
@@ -75,7 +86,6 @@ def generate_ai_response(contents_payload) -> str:
         except APIError as e:
             last_error = e
             if e.code in [404, 503, 429]:
-                print(f"Модель {model_name} вернула код {e.code}, переключаемся...")
                 if model_name in cached_working_models and len(cached_working_models) > 1:
                     cached_working_models.remove(model_name)
                 time.sleep(1)
@@ -89,7 +99,6 @@ def generate_ai_response(contents_payload) -> str:
     raise last_error or Exception("Не удалось получить ответ от нейросети.")
 
 def send_long_message(chat_id: int, text: str, reply_to_id: int = None):
-    """Безопасная отправка с нарезкой по 4000 символов"""
     if not text:
         return
     max_len = 4000
@@ -118,10 +127,14 @@ def check_group_trigger(message, text: str) -> bool:
     )
     return is_private or is_mentioned or is_reply_to_bot
 
-# 1. Обработка картинок с подписью
+# 1. Фото с вопросом/подписью
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     caption = message.caption or ""
+    sender_name = message.from_user.first_name or "Участник"
+    if caption:
+        log_message(message.chat.id, sender_name, f"[Фото с подписью]: {caption}")
+
     if not check_group_trigger(message, caption):
         return
 
@@ -134,7 +147,6 @@ def handle_photo(message):
     if not prompt:
         prompt = "Опиши подробно, что изображено на фото, проанализируй состав/свойства и дай практические рекомендации."
 
-    # Если фото прислано в ответ на сообщение бота
     if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
         prev_text = message.reply_to_message.text or ""
         if len(prev_text) > 1200:
@@ -155,12 +167,18 @@ def handle_photo(message):
         reply_text = generate_ai_response([image_part, prompt])
         send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        send_long_message(message.chat.id, f"Ошибка при анализе изображения: {e}", reply_to_id=message.message_id)
+        send_long_message(message.chat.id, f"Ошибка при анализе фото: {e}", reply_to_id=message.message_id)
 
-# 2. Обработка обычного текста с продолжением диалога через Reply
+# 2. Обычный текст + сбор логов за день
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     user_text = message.text or ""
+    sender_name = message.from_user.first_name or "Участник"
+
+    # Запоминаем реплику в дневной журнал чата
+    log_message(message.chat.id, sender_name, user_text)
+
+    # Реагируем только если обратились к боту
     if not check_group_trigger(message, user_text):
         return
 
@@ -174,7 +192,7 @@ def handle_message(message):
         bot.reply_to(message, "Чем могу помочь?")
         return
 
-    # ВЕДЕНИЕ ДИАЛОГА: если вы отвечаете (Reply) на сообщение бота
+    # Подтягиваем контекст при ответе через Reply
     if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
         prev_bot_reply = message.reply_to_message.text or ""
         if len(prev_bot_reply) > 1500:
@@ -196,6 +214,50 @@ def handle_message(message):
     except Exception as e:
         send_long_message(message.chat.id, f"Ошибка при ответе: {e}", reply_to_id=message.message_id)
 
+# 3. Планировщик шутливого анализа чата в 23:59 (МСК)
+def daily_summary_scheduler():
+    msk_tz = pytz.timezone("Europe/Moscow")
+    last_sent_date = None
+
+    print("Планировщик вечернего анализа чата запущен...")
+    while True:
+        try:
+            now = datetime.now(msk_tz)
+            today_str = now.strftime("%Y-%m-%d")
+
+            # Срабатывает ровно в 23:59 по Москве
+            if now.hour == 23 and now.minute == 59 and last_sent_date != today_str:
+                for chat_id, messages in list(daily_chat_logs.items()):
+                    # Если за день написали хотя бы 5 сообщений
+                    if len(messages) >= 5:
+                        chat_history_text = "\n".join(messages)
+                        prompt = (
+                            "Перед тобой история сообщений друзей в Telegram-чате за сегодня:\n\n"
+                            f"{chat_history_text}\n\n"
+                            "Сделай короткий, живой и остроумный дайджест дня для этой компании друзей:\n"
+                            "1. Главная тема или драма дня (о чем больше всего спорили/общались).\n"
+                            "2. 'Душнила дня' или 'Философ дня' (в добром ключе).\n"
+                            "3. Лучшая цитата или мысль дня.\n"
+                            "4. Итог дня в 1-2 смешных предложениях.\n\n"
+                            "Стиль: дружеский, легкий юмор, без цензурного занудства, но без грубости."
+                        )
+                        try:
+                            summary = generate_ai_response(prompt)
+                            header = f"🌙 <b>Итоги дня чата ({now.strftime('%d.%m.%Y')}):</b>\n\n"
+                            send_long_message(chat_id, header + summary)
+                        except Exception as err:
+                            print(f"Ошибка генерации итогов для {chat_id}: {err}")
+                    
+                    # Очищаем историю чата на следующий день
+                    daily_chat_logs[chat_id] = []
+
+                last_sent_date = today_str
+
+        except Exception as e:
+            print(f"Ошибка в планировщике итогов дня: {e}")
+
+        time.sleep(30)
+
 def run_telebot():
     print("Инициализация Telegram polling...")
     try:
@@ -213,8 +275,8 @@ def run_telebot():
             time.sleep(3)
 
 if __name__ == "__main__":
-    t = threading.Thread(target=run_telebot, daemon=True)
-    t.start()
+    threading.Thread(target=run_telebot, daemon=True).start()
+    threading.Thread(target=daily_summary_scheduler, daemon=True).start()
 
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
