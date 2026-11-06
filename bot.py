@@ -80,8 +80,8 @@ CHARACTERS = {
 
 BREVITY_RULE = (
     "ПРАВИЛО ФОРМАТА И КРАТКОСТИ:\n"
-    "Отвечай емко, живо и в 2 раза короче обычного. "
-    "Не пиши длинные простыни текста. Твой ответ должен укладываться максимум в 1-2 небольших абзаца "
+    "Отвечай емко, живо и лаконично, без лишней воды. "
+    "Твой ответ должен укладываться максимум в 1-2 небольших абзаца "
     "(или 2-3 коротких пункта), сохраняя при этом заданный характер и суть ответа."
 )
 
@@ -170,9 +170,16 @@ def check_group_trigger(message, text: str) -> bool:
         message.reply_to_message is not None
         and message.reply_to_message.from_user.id == bot.get_me().id
     )
-    is_called_by_name = any(name in lower_text for name in [
-        "диана", "дианка", "михалыч", "прораб", "тони", "кардаш", "никита", "жиробас"
-    ])
+
+    current_role = chat_modes.get(message.chat.id, "дефолт")
+
+    # В РЕЖИМЕ ДЕФОЛТ ВСЕ ТРИГГЕРЫ И ИМЕНА ОТКЛЮЧЕНЫ
+    if current_role == "дефолт":
+        return is_private or is_mentioned or is_reply_to_bot
+
+    # Если включен не дефолт — реагируем на имена персонажей
+    all_names = ["диана", "дианка", "михалыч", "прораб", "тони", "кардаш", "никита", "жиробас"]
+    is_called_by_name = any(name in lower_text for name in all_names)
 
     return is_private or is_mentioned or is_reply_to_bot or is_called_by_name
 
@@ -194,7 +201,7 @@ def handle_mode_switch(message):
             message,
             f"Текущий режим чата: <b>{current.upper()}</b>\n\n"
             f"Доступные роли:\n{modes_list}\n\n"
-            f"Чтобы включить: <code>/mode кардаш</code> или <code>/mode диана</code>",
+            f"Чтобы включить: <code>/mode дефолт</code> или <code>/mode диана</code>",
             parse_mode="HTML"
         )
         return
@@ -202,11 +209,18 @@ def handle_mode_switch(message):
     selected = args[1].strip().lower()
     if selected in CHARACTERS:
         chat_modes[message.chat.id] = selected
-        bot.reply_to(
-            message,
-            f"🎭 Режим успешно включен: <b>{selected.upper()}</b>!",
-            parse_mode="HTML"
-        )
+        if selected == "дефолт":
+            bot.reply_to(
+                message,
+                "⚙️ Режим сброшен на: <b>ДЕФОЛТ</b>.\nВсе личности и триггеры по именам отключены.",
+                parse_mode="HTML"
+            )
+        else:
+            bot.reply_to(
+                message,
+                f"🎭 Режим успешно включен: <b>{selected.upper()}</b>!",
+                parse_mode="HTML"
+            )
     else:
         bot.reply_to(
             message,
@@ -231,11 +245,14 @@ def handle_photo(message):
         prompt = "Опиши кратко, что изображено на фото, проанализируй свойства и дай лаконичный совет."
 
     current_role = chat_modes.get(message.chat.id, "дефолт")
-    lower_prompt = prompt.lower()
-    if "диан" in lower_prompt:
-        current_role = "диана"
-    elif any(k in lower_prompt for k in ["кардаш", "жиробас", "никит"]):
-        current_role = "кардаш"
+
+    # Переключаем личность по имени, только если в чате НЕ дефолт
+    if current_role != "дефолт":
+        lower_prompt = prompt.lower()
+        if "диан" in lower_prompt:
+            current_role = "диана"
+        elif any(k in lower_prompt for k in ["кардаш", "жиробас", "никит"]):
+            current_role = "кардаш"
 
     system_instruction = CHARACTERS.get(current_role, "")
 
@@ -287,11 +304,14 @@ def handle_message(message):
         return
 
     current_role = chat_modes.get(message.chat.id, "дефолт")
-    lower_prompt = prompt.lower()
-    if "диан" in lower_prompt:
-        current_role = "диана"
-    elif any(k in lower_prompt for k in ["кардаш", "жиробас", "никит"]):
-        current_role = "кардаш"
+
+    # Переключаем личность по имени, только если в чате НЕ дефолт
+    if current_role != "дефолт":
+        lower_prompt = prompt.lower()
+        if "диан" in lower_prompt:
+            current_role = "диана"
+        elif any(k in lower_prompt for k in ["кардаш", "жиробас", "никит"]):
+            current_role = "кардаш"
 
     system_instruction = CHARACTERS.get(current_role, "")
 
