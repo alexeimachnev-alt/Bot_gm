@@ -25,24 +25,23 @@ app = Flask(__name__)
 def health_check():
     return "Bot is alive!", 200
 
-# Память чатов
+# Хранилище сессий для диалогов
 chat_sessions = {}
 
-# Только стабильные рабочие модели
-MODELS_TO_TRY = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-2.5-pro"
+# Актуальные модели 2026 года, поддерживаемые вашим ключом
+ACTIVE_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.1-pro-preview"
 ]
 
-def get_or_create_chat(chat_id: int, model_name: str = "gemini-2.5-flash"):
+def get_or_create_chat(chat_id: int, model_name: str = "gemini-3.8-flash"):
     if chat_id not in chat_sessions:
         chat_sessions[chat_id] = ai_client.chats.create(model=model_name)
     return chat_sessions[chat_id]
 
 def send_to_gemini(chat_id: int, message_payload) -> str:
     last_error = None
-    for model_name in MODELS_TO_TRY:
+    for model_name in ACTIVE_MODELS:
         try:
             chat = get_or_create_chat(chat_id, model_name=model_name)
             response = chat.send_message(message_payload)
@@ -52,7 +51,7 @@ def send_to_gemini(chat_id: int, message_payload) -> str:
             last_error = e
             chat_sessions.pop(chat_id, None)
             if e.code in [404, 503, 429]:
-                time.sleep(1)
+                time.sleep(1.5)
                 continue
             break
         except Exception as e:
@@ -153,13 +152,15 @@ def handle_message(message):
         send_long_message(message.chat.id, f"Ошибка: {e}", reply_to_id=message.message_id)
 
 def run_telebot():
-    print("Telegram polling запущен...")
-    # Сбрасываем старые зависшие запросы Telegram
+    print("Инициализация Telegram polling...")
+    # Принудительно освобождаем очередь и сбрасываем старые сокеты
     try:
         bot.delete_webhook(drop_pending_updates=True)
-    except Exception:
-        pass
+        time.sleep(2)
+    except Exception as e:
+        print(f"Сброс webhook: {e}")
 
+    print("Telegram polling запущен...")
     while True:
         try:
             bot.polling(none_stop=True, interval=1, timeout=20)
