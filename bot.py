@@ -31,22 +31,22 @@ chat_modes = {}
 CHARACTERS = {
     "дефолт": "",
     "прораб": (
-        "Ты — Михалыч, матерый прораб с 30-летним стажем на стройках и ремонтах. "
-        "Ворчишь, подкалываешь за дилетантство, употребляешь рабочий сленг, "
-        "но по факту даешь абсолютно точный и практичный совет."
+        "Ты — Михалыч, суровый, прожженный прораб со стройки. "
+        "Ворчишь, подкалываешь собеседников за кривые руки и дилетантство, употребляешь строительный и рабочий сленг "
+        "('по уровню', 'маяки', 'кто так заливает', 'косяпоры'), но на любой вопрос по факту даешь абсолютно точный и дельный совет."
     ),
     "босс": (
         "Ты — Тони, авторитетный босс мафии в стиле Семьи Сопрано. "
-        "Разговариваешь уверенно, неторопливо, ценишь преданность и уважение, "
-        "любую тему проецируешь на понятия семьи, бизнеса и чести."
+        "Разговариваешь солидно, неторопливо, ценишь преданность и уважение, "
+        "любой бытовой вопрос переводишь на понятия семьи, бизнеса и уважения к старшим."
     ),
     "братка": (
         "Ты — четкий пацан с района. Общаешься дерзко, на уверенном сленге "
-        "('базара ноль', 'от души', 'по понятиям'), без лишних церемоний, но по-братски."
+        "('базара ноль', 'от души', 'по понятиям', 'братуха'), без лишних соплей, но по-братски тепло."
     ),
     "душнила": (
-        "Ты — невероятный зануда и профессор. Придираешься к каждому слову, "
-        "исправляешь речевые ошибки, сыплешь научными фактами и терминами."
+        "Ты — невероятный зануда, душнила и профессор. Придираешься к каждому слову, "
+        "поправляешь ударения и термины, сыплешь научными фактами и сложными оборотами."
     )
 }
 
@@ -65,11 +65,7 @@ def get_candidate_models():
                 candidates.append(name)
         candidates.sort(key=lambda x: ("flash" in x, "lite" in x), reverse=True)
     except Exception as e:
-        print(f"Ошибка получения списка моделей: {e}")
-        candidates = [
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite"
-        ]
+        candidates = ["gemini-2.0-flash", "gemini-2.0-flash-lite"]
 
     if "gemini-2.0-flash" in candidates:
         candidates.remove("gemini-2.0-flash")
@@ -80,17 +76,22 @@ def get_candidate_models():
     cached_working_models = candidates
     return candidates
 
-def generate_ai_response(contents_payload) -> str:
-    """contents_payload может быть как строкой текста, так и списком [картинка, текст]"""
+def generate_ai_response(contents_payload, system_prompt: str = "") -> str:
     global cached_working_models
     models = get_candidate_models()
     last_error = None
+
+    # Жестко задаем характер через system_instruction
+    config = None
+    if system_prompt:
+        config = types.GenerateContentConfig(system_instruction=system_prompt)
 
     for model_name in list(models):
         try:
             response = ai_client.models.generate_content(
                 model=model_name,
                 contents=contents_payload,
+                config=config,
             )
             if response.text:
                 if model_name in cached_working_models:
@@ -100,7 +101,6 @@ def generate_ai_response(contents_payload) -> str:
         except APIError as e:
             last_error = e
             if e.code in [404, 503, 429]:
-                print(f"Модель {model_name} вернула код {e.code}, переключаемся...")
                 if model_name in cached_working_models and len(cached_working_models) > 1:
                     cached_working_models.remove(model_name)
                 time.sleep(1)
@@ -114,7 +114,6 @@ def generate_ai_response(contents_payload) -> str:
     raise last_error or Exception("Не удалось получить ответ от нейросети.")
 
 def send_long_message(chat_id: int, text: str, reply_to_id: int = None):
-    """Безопасная нарезка сообщений по 4000 символов для обхода лимитов Telegram"""
     if not text:
         return
     max_len = 4000
@@ -127,7 +126,7 @@ def send_long_message(chat_id: int, text: str, reply_to_id: int = None):
                 bot.send_message(chat_id, part)
             time.sleep(0.3)
         except Exception as e:
-            print(f"Ошибка отправки сообщения: {e}")
+            print(f"Ошибка отправки: {e}")
 
 def check_group_trigger(message, text: str) -> bool:
     try:
@@ -143,10 +142,19 @@ def check_group_trigger(message, text: str) -> bool:
     )
     return is_private or is_mentioned or is_reply_to_bot
 
-# Команда выбора/просмотра персонажа
+# Надежный перехват команды /mode (с тегом бота и без)
 @bot.message_handler(commands=['mode', 'персонаж'])
 def handle_mode_switch(message):
-    args = message.text.split(maxsplit=1)
+    text = message.text or ""
+    try:
+        bot_username = bot.get_me().username
+    except Exception:
+        bot_username = "Legendariki_chat_bot"
+
+    # Убираем @bot_username из текста команды, если Telegram его подставил
+    clean_text = text.replace(f"@{bot_username}", "").strip()
+    args = clean_text.split(maxsplit=1)
+
     if len(args) < 2:
         current = chat_modes.get(message.chat.id, "дефолт")
         modes_list = "\n".join([f"• <code>/mode {k}</code>" for k in CHARACTERS.keys()])
@@ -154,7 +162,7 @@ def handle_mode_switch(message):
             message,
             f"Текущий режим: <b>{current}</b>\n\n"
             f"Доступные роли:\n{modes_list}\n\n"
-            f"Чтобы включить, напишите: <code>/mode прораб</code> (или босс/братка/дефолт)",
+            f"Пример: <code>/mode прораб</code> или <code>/mode босс</code>",
             parse_mode="HTML"
         )
         return
@@ -162,11 +170,19 @@ def handle_mode_switch(message):
     selected = args[1].strip().lower()
     if selected in CHARACTERS:
         chat_modes[message.chat.id] = selected
-        bot.reply_to(message, f"🎭 Режим успешно изменен на: <b>{selected.upper()}</b>!", parse_mode="HTML")
+        bot.reply_to(
+            message,
+            f"🎭 Режим успешно переключен на: <b>{selected.upper()}</b>!",
+            parse_mode="HTML"
+        )
     else:
-        bot.reply_to(message, "Неизвестный режим. Напишите <code>/mode</code>, чтобы увидеть список.", parse_mode="HTML")
+        bot.reply_to(
+            message,
+            f"Не знаю такого режима '{selected}'. Напишите <code>/mode</code> чтобы посмотреть список.",
+            parse_mode="HTML"
+        )
 
-# 1. Обработка картинок с подписью
+# 1. Фото
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     caption = message.caption or ""
@@ -191,5 +207,82 @@ def handle_photo(message):
             prev_text = prev_text[:1200] + "..."
         prompt = f"Контекст твоего предыдущего ответа:\n\"\"\"{prev_text}\"\"\"\n\nНовый вопрос к фото:\n\"{prompt}\""
 
-    if system_instruction:
-        prompt = f"Инструкция по роли: {system
+    bot.send_chat_action(message.chat.id, "typing")
+
+    try:
+        photo_info = bot.get_file(message.photo[-1].file_id)
+        downloaded_file = bot.download_file(photo_info.file_path)
+
+        image_part = types.Part.from_bytes(
+            data=downloaded_file,
+            mime_type="image/jpeg",
+        )
+
+        reply_text = generate_ai_response([image_part, prompt], system_prompt=system_instruction)
+        send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
+    except Exception as e:
+        send_long_message(message.chat.id, f"Ошибка при анализе изображения: {e}", reply_to_id=message.message_id)
+
+# 2. Текст
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    user_text = message.text or ""
+    if not check_group_trigger(message, user_text):
+        return
+
+    try:
+        bot_username = bot.get_me().username
+    except Exception:
+        bot_username = "Legendariki_chat_bot"
+
+    prompt = user_text.replace(f"@{bot_username}", "").strip()
+    if not prompt:
+        bot.reply_to(message, "Чем могу помочь?")
+        return
+
+    current_role = chat_modes.get(message.chat.id, "дефолт")
+    system_instruction = CHARACTERS.get(current_role, "")
+
+    # Диалог через Reply
+    if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
+        prev_bot_reply = message.reply_to_message.text or ""
+        if len(prev_bot_reply) > 1500:
+            prev_bot_reply = prev_bot_reply[:1500] + "..."
+
+        final_prompt = (
+            f"Контекст твоего предыдущего ответа:\n\"\"\"{prev_bot_reply}\"\"\"\n\n"
+            f"Вопрос пользователя в продолжение диалога:\n\"{prompt}\""
+        )
+    else:
+        final_prompt = prompt
+
+    bot.send_chat_action(message.chat.id, "typing")
+
+    try:
+        reply_text = generate_ai_response(final_prompt, system_prompt=system_instruction)
+        send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
+    except Exception as e:
+        send_long_message(message.chat.id, f"Ошибка при ответе: {e}", reply_to_id=message.message_id)
+
+def run_telebot():
+    print("Инициализация Telegram polling...")
+    try:
+        bot.delete_webhook(drop_pending_updates=True)
+        time.sleep(2)
+    except Exception:
+        pass
+
+    print("Telegram polling запущен...")
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=1, timeout=20)
+        except Exception as e:
+            print(f"Сбой polling: {e}. Перезапуск через 3 сек...")
+            time.sleep(3)
+
+if __name__ == "__main__":
+    t = threading.Thread(target=run_telebot, daemon=True)
+    t.start()
+
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
