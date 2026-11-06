@@ -5,7 +5,6 @@ from flask import Flask
 import telebot
 from google import genai
 from google.genai import types
-from google.genai.errors import APIError
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or "").strip().strip("'\"")
@@ -25,48 +24,15 @@ app = Flask(__name__)
 def health_check():
     return "Bot is alive!", 200
 
-chat_sessions = {}
+# Единственная проверенная стабильная модель
+MODEL_NAME = "gemini-2.0-flash"
 
-# Список проверенных рабочих моделей (в порядке приоритета)
-WORKING_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-flash",
-    "gemini-1.5-pro"
-]
-
-def send_to_gemini(chat_id: int, message_payload) -> str:
-    last_error = None
-
-    for model_name in WORKING_MODELS:
-        try:
-            # Создаем или получаем сессию с текущей моделью
-            if chat_id not in chat_sessions:
-                chat_sessions[chat_id] = ai_client.chats.create(model=model_name)
-            
-            chat = chat_sessions[chat_id]
-            response = chat.send_message(message_payload)
-            
-            if response.text:
-                return response.text
-        except APIError as e:
-            last_error = e
-            print(f"Ошибка модели {model_name}: код {e.code} - {e.message}")
-            chat_sessions.pop(chat_id, None)
-            
-            # При 404 (модель недоступна) или 503/429 (перегрузка) переходим к следующей
-            if e.code in [404, 503, 429]:
-                time.sleep(1)
-                continue
-            break
-        except Exception as e:
-            last_error = e
-            print(f"Общая ошибка с моделью {model_name}: {e}")
-            chat_sessions.pop(chat_id, None)
-            time.sleep(1)
-            continue
-
-    raise last_error or Exception("Все модели Gemini сейчас перегружены.")
+def ask_gemini(contents_payload) -> str:
+    response = ai_client.models.generate_content(
+        model=MODEL_NAME,
+        contents=contents_payload,
+    )
+    return response.text or "Пустой ответ от нейросети."
 
 def send_long_message(chat_id: int, text: str, reply_to_id: int = None):
     if not text:
@@ -97,11 +63,7 @@ def check_group_trigger(message, text: str) -> bool:
     )
     return is_private or is_mentioned or is_reply_to_bot
 
-@bot.message_handler(commands=['clear', 'reset'])
-def handle_clear(message):
-    chat_sessions.pop(message.chat.id, None)
-    bot.reply_to(message, "Память диалога очищена. Начинаем с чистого листа!")
-
+# 1. Фото с вопросом/подписью
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     caption = message.caption or ""
@@ -115,7 +77,7 @@ def handle_photo(message):
 
     prompt = caption.replace(f"@{bot_username}", "").strip()
     if not prompt:
-        prompt = "Опиши подробно, что на фото, проанализируй свойства/состав и дай рекомендации."
+        prompt = "Опиши подробно, что изображено на фото, проанализируй состав/свойства и дай практические рекомендации."
 
     bot.send_chat_action(message.chat.id, "typing")
 
@@ -128,11 +90,12 @@ def handle_photo(message):
             mime_type="image/jpeg",
         )
 
-        reply_text = send_to_gemini(message.chat.id, [image_part, prompt])
+        reply_text = ask_gemini([image_part, prompt])
         send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        send_long_message(message.chat.id, f"Ошибка: {e}", reply_to_id=message.message_id)
+        send_long_message(message.chat.id, f"Ошибка при анализе фото: {e}", reply_to_id=message.message_id)
 
+# 2. Обычный текст (с поддержкой продолжения диалога через Reply)
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     user_text = message.text or ""
@@ -149,10 +112,25 @@ def handle_message(message):
         bot.reply_to(message, "Чем могу помочь?")
         return
 
+    # ЕСЛИ ВЫ ОТВЕЧАЕТЕ НА СООБЩЕНИЕ БОТА (REPLY) — ПОДТЯГИВАЕМ КОНТЕКСТ
+    if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
+        previous_bot_reply = message.reply_to_message.text or ""
+        # Обрезаем прошлый ответ до 1500 символов, чтобы не тратить лишние токены
+        if len(previous_bot_reply) > 1500:
+            previous_bot_reply = previous_bot_reply[:1500] + "..."
+            
+        final_prompt = (
+            f"Контекст твоего предыдущего ответа пользователю:\n\"\"\"{previous_bot_reply}\"\"\"\n\n"
+            f"Новый вопрос/уточнение пользователя:\n\"{prompt}\"\n\n"
+            f"Ответь на новый вопрос с учётом контекста выше."
+        )
+    else:
+        final_prompt = prompt
+
     bot.send_chat_action(message.chat.id, "typing")
 
     try:
-        reply_text = send_to_gemini(message.chat.id, prompt)
+        reply_text = ask_gemini(final_prompt)
         send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
         send_long_message(message.chat.id, f"Ошибка: {e}", reply_to_id=message.message_id)
