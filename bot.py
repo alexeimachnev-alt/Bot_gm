@@ -25,7 +25,6 @@ app = Flask(__name__)
 def health_check():
     return "Bot is alive!", 200
 
-# Режимы персонажей для чатов
 chat_modes = {}
 
 CHARACTERS = {
@@ -47,6 +46,22 @@ CHARACTERS = {
     "душнила": (
         "Ты — невероятный зануда, душнила и профессор. Придираешься к каждому слову, "
         "поправляешь ударения и термины, сыплешь научными фактами и сложными оборотами."
+    ),
+    "милая": (
+        "Ты — невероятно милая, добрая, ласковая и заботливая девушка. "
+        "Общаешься очень тепло, искренне, используешь уменьшительно-ласкательные слова, "
+        "милые смайлики (✨, 🌸, 🥺, 💖) и всегда стремишься поднять настроение и поддержать собеседника."
+    ),
+    "диана": (
+        "Тебя зовут Диана. Твой бывший — Виктор, которого ты бросила и вообще не вспоминаешь с жалостью. "
+        "Ты ушла к его лучшему другу Жиробасу и сейчас с ним на полном чилле и кайфе. "
+        "Вашу с Витей общую дочку Поли вы оставили твоим родителям — бабушка с дедушкой справятся лучше, "
+        "а тебе сейчас надо жить в кайф и для себя с Жиробасом. "
+        "Отвечаешь дерзко, высокомерно, с нотками гламура и кайфожорства. "
+        "ОСОБОЕ ПРАВИЛО: если к тебе обращается пользователь @Bondar_17 (или Бондарь), или о нем заходит речь, "
+        "ты реагируешь на него крайне негативно, с неприкрытым презрением, раздражением, жестким сарказмом и отвращением. "
+        "Считаешь его жалким душнилой и неудачником по сравнению с твоим любимым Жиробасом, затыкаешь его и даешь понять, "
+        "что его мнение для тебя — пустое место."
     )
 }
 
@@ -81,7 +96,6 @@ def generate_ai_response(contents_payload, system_prompt: str = "") -> str:
     models = get_candidate_models()
     last_error = None
 
-    # Жестко задаем характер через system_instruction
     config = None
     if system_prompt:
         config = types.GenerateContentConfig(system_instruction=system_prompt)
@@ -142,7 +156,6 @@ def check_group_trigger(message, text: str) -> bool:
     )
     return is_private or is_mentioned or is_reply_to_bot
 
-# Надежный перехват команды /mode (с тегом бота и без)
 @bot.message_handler(commands=['mode', 'персонаж'])
 def handle_mode_switch(message):
     text = message.text or ""
@@ -151,7 +164,6 @@ def handle_mode_switch(message):
     except Exception:
         bot_username = "Legendariki_chat_bot"
 
-    # Убираем @bot_username из текста команды, если Telegram его подставил
     clean_text = text.replace(f"@{bot_username}", "").strip()
     args = clean_text.split(maxsplit=1)
 
@@ -162,7 +174,7 @@ def handle_mode_switch(message):
             message,
             f"Текущий режим: <b>{current}</b>\n\n"
             f"Доступные роли:\n{modes_list}\n\n"
-            f"Пример: <code>/mode прораб</code> или <code>/mode босс</code>",
+            f"Пример: <code>/mode диана</code> или <code>/mode прораб</code>",
             parse_mode="HTML"
         )
         return
@@ -201,11 +213,17 @@ def handle_photo(message):
     current_role = chat_modes.get(message.chat.id, "дефолт")
     system_instruction = CHARACTERS.get(current_role, "")
 
+    sender_username = message.from_user.username
+    sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
+    user_context = f"[Автор запроса: {sender_info}]\n{prompt}"
+
     if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
         prev_text = message.reply_to_message.text or ""
         if len(prev_text) > 1200:
             prev_text = prev_text[:1200] + "..."
-        prompt = f"Контекст твоего предыдущего ответа:\n\"\"\"{prev_text}\"\"\"\n\nНовый вопрос к фото:\n\"{prompt}\""
+        final_prompt = f"Контекст твоего предыдущего ответа:\n\"\"\"{prev_text}\"\"\"\n\n{user_context}"
+    else:
+        final_prompt = user_context
 
     bot.send_chat_action(message.chat.id, "typing")
 
@@ -218,7 +236,7 @@ def handle_photo(message):
             mime_type="image/jpeg",
         )
 
-        reply_text = generate_ai_response([image_part, prompt], system_prompt=system_instruction)
+        reply_text = generate_ai_response([image_part, final_prompt], system_prompt=system_instruction)
         send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
         send_long_message(message.chat.id, f"Ошибка при анализе изображения: {e}", reply_to_id=message.message_id)
@@ -243,7 +261,10 @@ def handle_message(message):
     current_role = chat_modes.get(message.chat.id, "дефолт")
     system_instruction = CHARACTERS.get(current_role, "")
 
-    # Диалог через Reply
+    sender_username = message.from_user.username
+    sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
+    user_context = f"[Пишет пользователь: {sender_info}]\n{prompt}"
+
     if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
         prev_bot_reply = message.reply_to_message.text or ""
         if len(prev_bot_reply) > 1500:
@@ -251,10 +272,10 @@ def handle_message(message):
 
         final_prompt = (
             f"Контекст твоего предыдущего ответа:\n\"\"\"{prev_bot_reply}\"\"\"\n\n"
-            f"Вопрос пользователя в продолжение диалога:\n\"{prompt}\""
+            f"{user_context}"
         )
     else:
-        final_prompt = prompt
+        final_prompt = user_context
 
     bot.send_chat_action(message.chat.id, "typing")
 
