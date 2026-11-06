@@ -5,21 +5,22 @@ from flask import Flask
 import telebot
 from openai import OpenAI
 
+# Чтение ключей из Environment Render
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-# Ключ DeepSeek
-DEEPSEEK_API_KEY = (os.getenv("DEEPSEEK_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip().strip("'\"")
+# Читаем ключ xAI (поддерживаем оба названия переменной)
+XAI_API_KEY = (os.getenv("XAI_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip().strip("'\"")
 
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN не задан в Environment!")
-if not DEEPSEEK_API_KEY:
-    raise ValueError("DEEPSEEK_API_KEY не задан в Environment!")
+if not XAI_API_KEY:
+    raise ValueError("XAI_API_KEY не задан в Environment!")
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# DeepSeek полностью совместим с клиентом OpenAI
+# Клиент xAI через стандартный интерфейс OpenAI
 ai_client = OpenAI(
-    api_key=DEEPSEEK_API_KEY,
-    base_url="https://api.deepseek.com"
+    api_key=XAI_API_KEY,
+    base_url="https://api.x.ai/v1",
 )
 
 app = Flask(__name__)
@@ -29,15 +30,16 @@ app = Flask(__name__)
 def health_check():
     return "Bot is alive!", 200
 
-def get_ai_response(prompt: str) -> str:
+def get_grok_response(prompt: str) -> str:
     response = ai_client.chat.completions.create(
-        model="deepseek-chat",
+        model="grok-beta",
         messages=[
+            {"role": "system", "content": "Ты дружелюбный и остроумный помощник в Telegram-чате. Отвечай емко, по делу и с хорошим чувством юмора."},
             {"role": "user", "content": prompt}
         ],
-        stream=False
+        temperature=0.7,
     )
-    return response.choices[0].message.content
+    return response.choices[0].message.content or "Ответ пуст."
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -59,16 +61,16 @@ def handle_message(message):
 
     prompt = user_text.replace(f"@{bot_username}", "").strip()
     if not prompt:
-        bot.reply_to(message, "Чем могу помочь?")
+        bot.reply_to(message, "Слушаю! О чем поболтаем?")
         return
 
     bot.send_chat_action(message.chat.id, "typing")
 
     try:
-        reply_text = get_ai_response(prompt)
+        reply_text = get_grok_response(prompt)
         bot.reply_to(message, reply_text)
     except Exception as e:
-        bot.reply_to(message, f"Ошибка нейросети: {e}")
+        bot.reply_to(message, f"Ошибка Grok API: {e}")
 
 def run_telebot():
     print("Telegram polling запущен...")
@@ -76,7 +78,7 @@ def run_telebot():
         try:
             bot.polling(none_stop=True, interval=1, timeout=20)
         except Exception as e:
-            print(f"Сбой polling: {e}. Рестарт через 3 сек...")
+            print(f"Сбой polling: {e}. Перезапуск через 3 сек...")
             time.sleep(3)
 
 if __name__ == "__main__":
