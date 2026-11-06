@@ -25,14 +25,14 @@ app = Flask(__name__)
 def health_check():
     return "Bot is alive!", 200
 
-# Сессии чатов для контекстной памяти
+# Память чатов
 chat_sessions = {}
 
+# Только стабильные рабочие модели
 MODELS_TO_TRY = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
-    "gemini-3.8-flash",
-    "gemini-2.5-flash-preview"
+    "gemini-2.5-pro"
 ]
 
 def get_or_create_chat(chat_id: int, model_name: str = "gemini-2.5-flash"):
@@ -40,7 +40,7 @@ def get_or_create_chat(chat_id: int, model_name: str = "gemini-2.5-flash"):
         chat_sessions[chat_id] = ai_client.chats.create(model=model_name)
     return chat_sessions[chat_id]
 
-def send_to_gemini_with_fallback(chat_id: int, message_payload) -> str:
+def send_to_gemini(chat_id: int, message_payload) -> str:
     last_error = None
     for model_name in MODELS_TO_TRY:
         try:
@@ -64,21 +64,17 @@ def send_to_gemini_with_fallback(chat_id: int, message_payload) -> str:
     raise last_error or Exception("Сервис Gemini временно недоступен.")
 
 def send_long_message(chat_id: int, text: str, reply_to_id: int = None):
-    """Разбивает сообщения длиннее 4000 символов на части"""
     if not text:
         return
-
     max_len = 4000
-    # Нарезаем текст с шагом max_len
     parts = [text[i:i + max_len] for i in range(0, len(text), max_len)]
-
     for idx, part in enumerate(parts):
         try:
             if idx == 0 and reply_to_id:
                 bot.send_message(chat_id, part, reply_to_message_id=reply_to_id)
             else:
                 bot.send_message(chat_id, part)
-            time.sleep(0.3)  # Небольшая пауза между сообщениями
+            time.sleep(0.3)
         except Exception as e:
             print(f"Ошибка отправки сообщения: {e}")
 
@@ -99,7 +95,7 @@ def check_group_trigger(message, text: str) -> bool:
 @bot.message_handler(commands=['clear', 'reset'])
 def handle_clear(message):
     chat_sessions.pop(message.chat.id, None)
-    bot.reply_to(message, "Контекст диалога успешно очищен. Начинаем заново!")
+    bot.reply_to(message, "Память диалога очищена. Начинаем с чистого листа!")
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
@@ -127,10 +123,10 @@ def handle_photo(message):
             mime_type="image/jpeg",
         )
 
-        reply_text = send_to_gemini_with_fallback(message.chat.id, [image_part, prompt])
+        reply_text = send_to_gemini(message.chat.id, [image_part, prompt])
         send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        send_long_message(message.chat.id, f"Ошибка при анализе фото: {e}", reply_to_id=message.message_id)
+        send_long_message(message.chat.id, f"Ошибка: {e}", reply_to_id=message.message_id)
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -151,18 +147,24 @@ def handle_message(message):
     bot.send_chat_action(message.chat.id, "typing")
 
     try:
-        reply_text = send_to_gemini_with_fallback(message.chat.id, prompt)
+        reply_text = send_to_gemini(message.chat.id, prompt)
         send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        send_long_message(message.chat.id, f"Ошибка при ответе: {e}", reply_to_id=message.message_id)
+        send_long_message(message.chat.id, f"Ошибка: {e}", reply_to_id=message.message_id)
 
 def run_telebot():
     print("Telegram polling запущен...")
+    # Сбрасываем старые зависшие запросы Telegram
+    try:
+        bot.delete_webhook(drop_pending_updates=True)
+    except Exception:
+        pass
+
     while True:
         try:
             bot.polling(none_stop=True, interval=1, timeout=20)
         except Exception as e:
-            print(f"Сбой polling: {e}. Рестарт через 3 сек...")
+            print(f"Сбой polling: {e}. Перезапуск через 3 сек...")
             time.sleep(3)
 
 if __name__ == "__main__":
