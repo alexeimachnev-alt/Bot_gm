@@ -25,79 +25,62 @@ app = Flask(__name__)
 def health_check():
     return "Bot is alive!", 200
 
-# Хранилище контекста диалогов: { chat_id: [ {"role": "user"/"model", "parts": [...]}, ... ] }
-chat_histories = {}
-MAX_HISTORY_LEN = 12  # Храним последние 12 сообщений (6 вопросов и 6 ответов)
+# Сессии чатов для контекстной памяти
+chat_sessions = {}
 
-def get_chat_history(chat_id: int):
-    if chat_id not in chat_histories:
-        chat_histories[chat_id] = []
-    return chat_histories[chat_id]
+MODELS_TO_TRY = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-3.8-flash",
+    "gemini-2.5-flash-preview"
+]
 
-def add_to_history(chat_id: int, role: str, content):
-    history = get_chat_history(chat_id)
-    # Форматируем элемент истории под структуру Gemini
-    if isinstance(content, list):
-        history.append({"role": role, "parts": content})
-    else:
-        history.append({"role": role, "parts": [content]})
-    
-    # Ограничиваем размер, чтобы не перегружать токены и не вылетать за лимиты
-    if len(history) > MAX_HISTORY_LEN:
-        chat_histories[chat_id] = history[-MAX_HISTORY_LEN:]
+def get_or_create_chat(chat_id: int, model_name: str = "gemini-2.5-flash"):
+    if chat_id not in chat_sessions:
+        chat_sessions[chat_id] = ai_client.chats.create(model=model_name)
+    return chat_sessions[chat_id]
 
-cached_working_models = []
-
-def get_candidate_models():
-    global cached_working_models
-    if cached_working_models:
-        return cached_working_models
-
-    candidates = []
-    try:
-        for m in ai_client.models.list():
-            name = m.name.replace("models/", "")
-            if "flash" in name.lower() or "gemini" in name.lower():
-                candidates.append(name)
-        candidates.sort(key=lambda x: ("flash" in x, "lite" in x), reverse=True)
-    except Exception as e:
-        print(f"Ошибка получения списка моделей: {e}")
-        candidates = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-3.8-flash"]
-
-    cached_working_models = candidates
-    return candidates
-
-def generate_ai_response(history_contents) -> str:
-    global cached_working_models
-    models = get_candidate_models()
+def send_to_gemini_with_fallback(chat_id: int, message_payload) -> str:
     last_error = None
-
-    for model_name in list(models):
+    for model_name in MODELS_TO_TRY:
         try:
-            # Передаем всю историю диалога
-            response = ai_client.models.generate_content(
-                model=model_name,
-                contents=history_contents,
-            )
+            chat = get_or_create_chat(chat_id, model_name=model_name)
+            response = chat.send_message(message_payload)
             if response.text:
-                if model_name in cached_working_models:
-                    cached_working_models.remove(model_name)
-                    cached_working_models.insert(0, model_name)
                 return response.text
         except APIError as e:
             last_error = e
+            chat_sessions.pop(chat_id, None)
             if e.code in [404, 503, 429]:
-                if model_name in cached_working_models and len(cached_working_models) > 1:
-                    cached_working_models.remove(model_name)
                 time.sleep(1)
                 continue
             break
         except Exception as e:
             last_error = e
+            chat_sessions.pop(chat_id, None)
             time.sleep(1)
             continue
 
     raise last_error or Exception("Сервис Gemini временно недоступен.")
+
+def send_long_message(chat_id: int, text: str, reply_to_id: int = None):
+    """Разбивает сообщения длиннее 4000 символов на части"""
+    if not text:
+        return
+
+    max_len = 4000
+    # Нарезаем текст с шагом max_len
+    parts = [text[i:i + max_len] for i in range(0, len(text), max_len)]
+
+    for idx, part in enumerate(parts):
+        try:
+            if idx == 0 and reply_to_id:
+                bot.send_message(chat_id, part, reply_to_message_id=reply_to_id)
+            else:
+                bot.send_message(chat_id, part)
+            time.sleep(0.3)  # Небольшая пауза между сообщениями
+        except Exception as e:
+            print(f"Ошибка отправки сообщения: {e}")
 
 def check_group_trigger(message, text: str) -> bool:
     try:
@@ -113,13 +96,11 @@ def check_group_trigger(message, text: str) -> bool:
     )
     return is_private or is_mentioned or is_reply_to_bot
 
-# Команда сброса памяти
 @bot.message_handler(commands=['clear', 'reset'])
 def handle_clear(message):
-    chat_histories[message.chat.id] = []
-    bot.reply_to(message, "Контекст диалога очищен! Начинаем с чистого листа.")
+    chat_sessions.pop(message.chat.id, None)
+    bot.reply_to(message, "Контекст диалога успешно очищен. Начинаем заново!")
 
-# 1. Фото с подписью
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     caption = message.caption or ""
@@ -146,19 +127,11 @@ def handle_photo(message):
             mime_type="image/jpeg",
         )
 
-        user_content = [image_part, prompt]
-        add_to_history(message.chat.id, "user", user_content)
-
-        # Отправляем всю накопленную историю
-        history = get_chat_history(message.chat.id)
-        reply_text = generate_ai_response(history)
-
-        add_to_history(message.chat.id, "model", reply_text)
-        bot.reply_to(message, reply_text)
+        reply_text = send_to_gemini_with_fallback(message.chat.id, [image_part, prompt])
+        send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        bot.reply_to(message, f"Ошибка: {e}")
+        send_long_message(message.chat.id, f"Ошибка при анализе фото: {e}", reply_to_id=message.message_id)
 
-# 2. Обычный текст
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     user_text = message.text or ""
@@ -178,16 +151,10 @@ def handle_message(message):
     bot.send_chat_action(message.chat.id, "typing")
 
     try:
-        add_to_history(message.chat.id, "user", prompt)
-
-        # Передаем контекст диалога
-        history = get_chat_history(message.chat.id)
-        reply_text = generate_ai_response(history)
-
-        add_to_history(message.chat.id, "model", reply_text)
-        bot.reply_to(message, reply_text)
+        reply_text = send_to_gemini_with_fallback(message.chat.id, prompt)
+        send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        bot.reply_to(message, f"Ошибка: {e}")
+        send_long_message(message.chat.id, f"Ошибка при ответе: {e}", reply_to_id=message.message_id)
 
 def run_telebot():
     print("Telegram polling запущен...")
@@ -195,7 +162,7 @@ def run_telebot():
         try:
             bot.polling(none_stop=True, interval=1, timeout=20)
         except Exception as e:
-            print(f"Сбой polling: {e}. Перезапуск через 3 сек...")
+            print(f"Сбой polling: {e}. Рестарт через 3 сек...")
             time.sleep(3)
 
 if __name__ == "__main__":
