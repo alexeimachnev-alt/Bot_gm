@@ -5,6 +5,7 @@ import threading
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from flask import Flask
+import requests
 import telebot
 from telebot import types as tele_types
 from google import genai
@@ -13,6 +14,7 @@ from google.genai.errors import APIError
 
 TELEGRAM_BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip().strip("'\"")
 GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or "").strip().strip("'\"")
+FOOTBALL_API_KEY = (os.getenv("FOOTBALL_API_KEY") or "").strip().strip("'\"")
 
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN не задан в переменных окружения!")
@@ -20,7 +22,11 @@ if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY не задан в переменных окружения!")
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-ai_client = genai.Client(api_key=GEMINI_API_KEY)
+
+ai_client = genai.Client(
+    api_key=GEMINI_API_KEY,
+    http_options=types.HttpOptions(api_version="v1beta")
+)
 
 app = Flask(__name__)
 
@@ -31,6 +37,7 @@ def health_check():
 
 chat_modes = {}
 daily_chat_logs = defaultdict(list)
+awaiting_custom_date = {}
 
 MOCK_YESTERDAY_LOGS = [
     {"user": "@Bondar_17", "text": "Я минус дядь, я думал с ночевкой еду. Так не вариант вообще мотаться на таху рубль, там еще 2, и после футбола домой пиздовать через всю страну"},
@@ -125,7 +132,7 @@ def get_candidate_models():
     return [
         "gemini-2.5-flash",
         "gemini-2.0-flash",
-        "gemini-1.5-flash"
+        "gemini-flash-latest"
     ]
 
 def generate_ai_response(contents_payload) -> str:
@@ -194,6 +201,212 @@ def check_group_trigger(message, text: str) -> bool:
     is_called_by_name = any(name in lower_text for name in all_names)
 
     return is_private or is_mentioned or is_reply_to_bot or is_called_by_name
+
+# --- СПОРТИВНЫЙ МОДУЛЬ (SOFASCORE RAPIDAPI) ---
+
+def parse_sport_date(query: str):
+    moscow_tz = timezone(timedelta(hours=3))
+    now = datetime.now(moscow_tz)
+
+    target_date = now.strftime("%Y-%m-%d")
+    date_label = "сегодня"
+    remaining_text = query.strip().lower()
+
+    if "вчера" in remaining_text:
+        target_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        date_label = "вчера"
+    elif "завтра" in remaining_text:
+        target_date = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+        date_label = "завтра"
+    elif "сегодня" in remaining_text:
+        target_date = now.strftime("%Y-%m-%d")
+        date_label = "сегодня"
+    else:
+        iso_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", remaining_text)
+        if iso_match:
+            target_date = iso_match.group(1)
+            date_label = target_date
+        else:
+            dot_match = re.search(r"\b(\d{1,2})[\.\/ -](\d{1,2})(?:[\.\/ -](\d{2,4}))?\b", remaining_text)
+            if dot_match:
+                day = int(dot_match.group(1))
+                month = int(dot_match.group(2))
+                raw_year = dot_match.group(3)
+                year = int(raw_year) if raw_year else now.year
+                if year < 100:
+                    year += 2000
+                try:
+                    dt = datetime(year, month, day)
+                    target_date = dt.strftime("%Y-%m-%d")
+                    date_label = target_date
+                except Exception:
+                    pass
+
+    return target_date, date_label
+
+def fetch_sofascore_events(sport: str, query: str = "") -> str:
+    if not FOOTBALL_API_KEY:
+        return "[!] Переменная FOOTBALL_API_KEY не настроена на Render."
+
+    clean_key = FOOTBALL_API_KEY.strip().strip("'\"")
+    target_date, date_label = parse_sport_date(query)
+
+    url = "https://sofascore.p.rapidapi.com/tournaments/events"
+    headers = {
+        "x-rapidapi-key": clean_key,
+        "x-rapidapi-host": "sofascore.p.rapidapi.com"
+    }
+    params = {
+        "date": target_date,
+        "sport": sport
+    }
+
+    sport_title = "ФУТБОЛ" if sport == "football" else "ХОККЕЙ"
+
+    try:
+        res = requests.get(url, headers=headers, params=params, timeout=14)
+        if res.status_code == 404:
+            url_alt = "https://sofascore.p.rapidapi.com/events/schedule"
+            res = requests.get(url_alt, headers=headers, params=params, timeout=14)
+
+        data = res.json()
+        if "message" in data and "Invalid" in data["message"]:
+            return f"[!] Ошибка Sofascore: {data.get('message')}"
+
+        events = data.get("events") or data.get("response") or []
+        if not events:
+            return f"Матчей по запросу {sport_title} на {date_label} ({target_date}) не найдено."
+
+        raw_items = []
+        for e in events[:30]:
+            tourn = e.get("tournament", {}).get("name", "Турнир")
+            category = e.get("tournament", {}).get("category", {}).get("name", "")
+
+            home = e.get("homeTeam", {}).get("name", "Команда 1")
+            away = e.get("awayTeam", {}).get("name", "Команда 2")
+
+            home_score = e.get("homeScore", {}).get("current", "-")
+            away_score = e.get("awayScore", {}).get("current", "-")
+
+            status_desc = e.get("status", {}).get("description", "")
+
+            raw_items.append(f"[{category} - {tourn}] {home} {home_score}:{away_score} {away} ({status_desc})")
+
+        raw_text = "\n".join(raw_items)
+
+        translate_prompt = (
+            f"Перед тобой список спортивных матчей ({sport_title}):\n"
+            f'"""\n{raw_text}\n"""\n\n'
+            "Переведи названия клубов, стран и лиг НА РУССКИЙ ЯЗЫК и оформи красивый отчет.\n"
+            "Правила:\n"
+            "1. Сгруппируй по турнирам (РПЛ, АПЛ, КХЛ, НХЛ и т.д.).\n"
+            "2. Формат строки: 'Команда1 Счет : Счет Команда2 (статус/минута)'.\n"
+            "3. Статусы переводи на русский: Ended -> 'Завершен', Not started -> 'Не начался', In progress -> 'Идет игра'.\n"
+            "Не пиши вводных приветствий, сразу готовый переведенный список."
+        )
+
+        translated = generate_ai_response(translate_prompt)
+        return f"<b>{sport_title} ({date_label.upper()}, {target_date}):</b>\n\n{translated}"
+
+    except Exception as e:
+        return f"[!] Ошибка запроса данных Sofascore: {e}"
+
+def get_football_keyboard():
+    keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
+    b_today = tele_types.InlineKeyboardButton("Сегодня", callback_data="fb_today")
+    b_yesterday = tele_types.InlineKeyboardButton("Вчера", callback_data="fb_yesterday")
+    b_tomorrow = tele_types.InlineKeyboardButton("Завтра", callback_data="fb_tomorrow")
+    b_custom = tele_types.InlineKeyboardButton("Выбрать дату", callback_data="fb_custom")
+    keyboard.add(b_today, b_yesterday)
+    keyboard.add(b_tomorrow, b_custom)
+    return keyboard
+
+def get_hockey_keyboard():
+    keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
+    b_today = tele_types.InlineKeyboardButton("Сегодня", callback_data="hk_today")
+    b_yesterday = tele_types.InlineKeyboardButton("Вчера", callback_data="hk_yesterday")
+    b_tomorrow = tele_types.InlineKeyboardButton("Завтра", callback_data="hk_tomorrow")
+    b_custom = tele_types.InlineKeyboardButton("Выбрать дату", callback_data="hk_custom")
+    keyboard.add(b_today, b_yesterday)
+    keyboard.add(b_tomorrow, b_custom)
+    return keyboard
+
+@bot.message_handler(commands=['football', 'футбол'])
+def handle_football_cmd(message):
+    try:
+        bot_username = bot.get_me().username
+    except Exception:
+        bot_username = "Legendariki_chat_bot"
+
+    clean_text = (message.text or "").replace(f"@{bot_username}", "").strip()
+    parts = clean_text.split(maxsplit=1)
+
+    if len(parts) == 1:
+        bot.reply_to(
+            message,
+            "⚽ <b>Футбольный центр:</b>\nВыберите день или нажмите 'Выбрать дату':",
+            reply_markup=get_football_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+
+    bot.send_chat_action(message.chat.id, "typing")
+    result = fetch_sofascore_events("football", parts[1])
+    bot.reply_to(message, result, parse_mode="HTML")
+
+@bot.message_handler(commands=['hockey', 'хоккей'])
+def handle_hockey_cmd(message):
+    try:
+        bot_username = bot.get_me().username
+    except Exception:
+        bot_username = "Legendariki_chat_bot"
+
+    clean_text = (message.text or "").replace(f"@{bot_username}", "").strip()
+    parts = clean_text.split(maxsplit=1)
+
+    if len(parts) == 1:
+        bot.reply_to(
+            message,
+            "🏒 <b>Хоккейный центр (КХЛ / НХЛ):</b>\nВыберите день или нажмите 'Выбрать дату':",
+            reply_markup=get_hockey_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+
+    bot.send_chat_action(message.chat.id, "typing")
+    result = fetch_sofascore_events("ice-hockey", parts[1])
+    bot.reply_to(message, result, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith(("fb_", "hk_")))
+def handle_sport_callbacks(call):
+    is_football = call.data.startswith("fb_")
+    sport_type = "football" if is_football else "ice-hockey"
+
+    if call.data in ["fb_custom", "hk_custom"]:
+        awaiting_custom_date[call.message.chat.id] = sport_type
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            call.message.chat.id,
+            "<b>Введите дату (например: <code>15.10.2024</code> или <code>2024-11-05</code>):</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    bot.answer_callback_query(call.id, text="Загрузка матчей...")
+    bot.send_chat_action(call.message.chat.id, "typing")
+
+    mapping = {
+        "fb_today": "сегодня",
+        "fb_yesterday": "вчера",
+        "fb_tomorrow": "завтра",
+        "hk_today": "сегодня",
+        "hk_yesterday": "вчера",
+        "hk_tomorrow": "завтра"
+    }
+
+    query = mapping.get(call.data, "сегодня")
+    result = fetch_sofascore_events(sport_type, query)
+    bot.send_message(call.message.chat.id, result, parse_mode="HTML")
 
 # --- СВОДКИ СООБЩЕНИЙ ЧАТА ---
 
@@ -386,6 +599,14 @@ def handle_message(message):
         if len(daily_chat_logs[message.chat.id]) > 400:
             daily_chat_logs[message.chat.id].pop(0)
 
+    # Ожидание ввода даты после нажатия "Выбрать дату"
+    if message.chat.id in awaiting_custom_date and not user_text.startswith("/"):
+        sport_target = awaiting_custom_date.pop(message.chat.id)
+        bot.send_chat_action(message.chat.id, "typing")
+        result = fetch_sofascore_events(sport_target, user_text)
+        bot.reply_to(message, result, parse_mode="HTML")
+        return
+
     if not check_group_trigger(message, user_text):
         return
 
@@ -440,6 +661,8 @@ def handle_message(message):
 
 def setup_bot_commands():
     commands = [
+        tele_types.BotCommand("football", "Футбол (матчи и счет)"),
+        tele_types.BotCommand("hockey", "Хоккей (КХЛ / НХЛ)"),
         tele_types.BotCommand("mode", "Выбрать персонажа"),
         tele_types.BotCommand("summary", "Итог дня в чате"),
         tele_types.BotCommand("summary_test", "Тест сводки со стендапом")
