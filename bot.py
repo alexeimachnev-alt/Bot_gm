@@ -12,6 +12,9 @@ from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 
+# Импорт модуля инженерного расчёта сметы скважин
+from calc_module import register_calc_handlers
+
 TELEGRAM_BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip().strip("'\"")
 GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or "").strip().strip("'\"")
 FOOTBALL_API_KEY = (os.getenv("FOOTBALL_API_KEY") or "").strip().strip("'\"")
@@ -22,6 +25,9 @@ if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY не задан в переменных окружения!")
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+
+# Регистрация модуля расчёта скважин
+register_calc_handlers(bot)
 
 ai_client = genai.Client(
     api_key=GEMINI_API_KEY,
@@ -129,7 +135,6 @@ BREVITY_RULE = (
 )
 
 def get_candidate_models():
-    # Разнородные модели: если Flash перегружен (503), мгновенно подхватывает 2.0-flash или Pro
     return [
         "gemini-2.5-flash",
         "gemini-2.0-flash",
@@ -151,7 +156,6 @@ def generate_ai_response(contents_payload) -> str:
                 return response.text
         except APIError as e:
             last_error = e
-            # При 503 (перегрузка сервера) или 429 сразу пробуем следующую модель
             if e.code in [503, 429, 404]:
                 time.sleep(0.5)
                 continue
@@ -457,22 +461,18 @@ def handle_sport_callbacks(call):
     bot.send_chat_action(call.message.chat.id, "typing")
 
     mapping = {
-        # Футбол: дни
         "fb_dt_today": ("сегодня", ""),
         "fb_dt_yesterday": ("вчера", ""),
         "fb_dt_tomorrow": ("завтра", ""),
-        # Футбол: лиги
         "fb_lg_premier": ("сегодня", "premier"),
         "fb_lg_premier league": ("сегодня", "premier league"),
         "fb_lg_laliga": ("сегодня", "laliga"),
         "fb_lg_serie a": ("сегодня", "serie a"),
         "fb_lg_bundesliga": ("сегодня", "bundesliga"),
         "fb_lg_champions league": ("сегодня", "champions league"),
-        # Хоккей: дни
         "hk_dt_today": ("сегодня", ""),
         "hk_dt_yesterday": ("вчера", ""),
         "hk_dt_tomorrow": ("завтра", ""),
-        # Хоккей: лиги
         "hk_lg_khl": ("сегодня", "khl"),
         "hk_lg_nhl": ("сегодня", "nhl"),
         "hk_lg_vhl": ("сегодня", "vhl")
@@ -734,6 +734,8 @@ def handle_message(message):
 
 def setup_bot_commands():
     commands = [
+        tele_types.BotCommand("calc", "Калькулятор скважины и смета под ключ"),
+        tele_types.BotCommand("smeta", "Расчёт оборудования с кессоном"),
         tele_types.BotCommand("football", "Футбол (счет, вчера/сегодня/завтра, лиги)"),
         tele_types.BotCommand("hockey", "Хоккей (КХЛ, НХЛ, ВХЛ, счет)"),
         tele_types.BotCommand("mode", "Выбрать персонажа"),
