@@ -1,11 +1,15 @@
 import os
 from telebot import types
 
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "551209811"))
+# ID администраторов для отправки сборочных листов и заявок
+PRIMARY_ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID", "551209811"))
+SECOND_ADMIN_ID = int(os.getenv("SECOND_ADMIN_CHAT_ID", "447208738"))
+
+ADMIN_CHAT_IDS = [PRIMARY_ADMIN_ID, SECOND_ADMIN_ID]
 
 user_calc_sessions = {}
 
-# Каталог доп. расходников с переводом на 5 языков
+# Каталог дополнительных расходников
 EXTRA_ITEMS = {
     "pnd32": {
         "unit_type": "meters",
@@ -97,88 +101,102 @@ EXTRA_ITEMS = {
     }
 }
 
-# Актуальные данные официального прайса «МИШКА» (06.2026-2)
+# Прайс Мишка 06.2026-2
 PRICE_DATA = {
-    "m1": (
-        "🐻 <b>КЕССОНЫ МИШКА 1 (Ø1050 мм)</b>\n"
-        "<i>Материал: первичный монолитный полипропилен</i>\n\n"
-        "🔹 <b>Мишка 1 (H=2000 мм):</b>\n"
-        "• Проходной (без фланца): ОПТ <b>36 650 ₽</b> | МРЦ 58 000 ₽\n"
-        "• Фланец 125/133 мм: ОПТ <b>39 650 ₽</b> | МРЦ 61 000 ₽\n"
-        "• Фланец 159 мм: ОПТ <b>42 650 ₽</b> | МРЦ 64 000 ₽\n\n"
-        "🔹 <b>Мишка 1 LONG (H=2500 мм):</b>\n"
-        "• Проходной (без фланца): ОПТ <b>49 650 ₽</b> | МРЦ 78 000 ₽\n"
-        "• Фланец 125/133 мм: ОПТ <b>52 650 ₽</b> | МРЦ 81 000 ₽\n"
-        "• Фланец 159 мм: ОПТ <b>56 650 ₽</b> | МРЦ 85 000 ₽\n\n"
-        "<i>* Сгоны d32 мм (комплект 4 шт.): +1 520 ₽</i>"
-    ),
-    "m2": (
-        "🐻 <b>КЕССОНЫ МИШКА 2 (Ø1300 мм)</b>\n"
-        "<i>Материал: первичный монолитный полипропилен</i>\n\n"
-        "🔹 <b>Мишка 2 (H=2000 мм):</b>\n"
-        "• Проходной (без фланца): ОПТ <b>47 700 ₽</b> | МРЦ 75 000 ₽\n"
-        "• Фланец 125/133 мм: ОПТ <b>50 700 ₽</b> | МРЦ 78 000 ₽\n"
-        "• Фланец 159 мм: ОПТ <b>53 300 ₽</b> | МРЦ 82 000 ₽\n\n"
-        "🔹 <b>Мишка 2 LONG (H=2500 мм):</b>\n"
-        "• Проходной (без фланца): ОПТ <b>57 800 ₽</b> | МРЦ 89 000 ₽\n"
-        "• Фланец 125/133 мм: ОПТ <b>65 000 ₽</b> | МРЦ 95 000 ₽\n"
-        "• Фланец 159 мм: ОПТ <b>68 800 ₽</b> | МРЦ 100 000 ₽\n\n"
-        "<i>* Сгоны d32 мм (комплект 4 шт.): +1 520 ₽</i>"
-    ),
-    "m3": (
-        "🐻 <b>КЕССОНЫ МИШКА 3 (Ø1600 мм)</b>\n"
-        "<i>Материал: первичный монолитный полипропилен</i>\n\n"
-        "🔹 <b>Мишка 3 (H=2000 мм):</b>\n"
-        "• Проходной (без фланца): ОПТ <b>70 000 ₽</b> | МРЦ 101 000 ₽\n"
-        "• Фланец 125/133 мм: ОПТ <b>76 500 ₽</b> | МРЦ 115 000 ₽\n"
-        "• Фланец 159 мм: ОПТ <b>81 300 ₽</b> | МРЦ 124 600 ₽\n\n"
-        "🔹 <b>Мишка 3 LONG (H=2500 мм):</b>\n"
-        "• Проходной (без фланца): ОПТ <b>113 200 ₽</b> | МРЦ 154 300 ₽\n"
-        "• Фланец 125/133 мм: ОПТ <b>118 300 ₽</b> | МРЦ 161 200 ₽\n"
-        "• Фланец 159 мм: ОПТ <b>124 200 ₽</b> | МРЦ 166 100 ₽\n\n"
-        "<i>* Сгоны d32 мм (комплект 4 шт.): +1 520 ₽</i>"
-    ),
-    "m4": (
-        "🐻 <b>КЕССОНЫ МИШКА 4 (Ø2100 мм)</b>\n"
-        "<i>Материал: первичный монолитный полипропилен</i>\n\n"
-        "🔹 <b>Мишка 4 (H=2000 мм):</b>\n"
-        "• Проходной (без фланца): ОПТ <b>145 900 ₽</b> | РРЦ 191 600 ₽\n"
-        "• Фланец 125/133 мм: ОПТ <b>156 000 ₽</b> | РРЦ 194 600 ₽\n"
-        "• Фланец 159 мм: ОПТ <b>164 111 ₽</b> | РРЦ 199 600 ₽\n\n"
-        "🔹 <b>Мишка 4 LONG (H=2500 мм):</b>\n"
-        "• Проходной (без фланца): ОПТ <b>199 000 ₽</b> | РРЦ 245 600 ₽\n"
-        "• Фланец 125/133 мм: ОПТ <b>204 050 ₽</b> | РРЦ 250 600 ₽\n"
-        "• Фланец 159 мм: ОПТ <b>213 000 ₽</b> | РРЦ 287 400 ₽\n\n"
-        "<i>* Сгоны d32 мм (комплект 4 шт.): +1 520 ₽</i>"
-    ),
-    "rings": (
-        "🧱 <b>ГЕРМЕТИЧНАЯ ВСТАВКА УСИЛЕННАЯ + ЛЕСТНИЦА В ЖБ КОЛОДЕЦ</b>\n"
-        "<i>Пластиковые вставки (D = диаметр, H = высота):</i>\n\n"
-        "🔹 <b>Диаметр 0.9 м (D=0.9):</b>\n"
-        "• H=0.9 м: ОПТ <b>36 000 ₽</b> | МРЦ 45 000 ₽\n"
-        "• H=1.8 м: ОПТ <b>52 000 ₽</b> | МРЦ 65 000 ₽\n"
-        "• H=2.7 м: ОПТ <b>76 000 ₽</b> | МРЦ 95 000 ₽\n"
-        "• H=3.6 м: ОПТ <b>92 000 ₽</b> | МРЦ 115 000 ₽\n"
-        "• H=4.4 м: ОПТ <b>116 000 ₽</b> | МРЦ 145 000 ₽\n"
-        "• H=5.1 м: ОПТ <b>140 000 ₽</b> | МРЦ 175 000 ₽\n\n"
-        "🔹 <b>Диаметр 1.4 м (D=1.4):</b>\n"
-        "• H=0.9 м: ОПТ <b>52 000 ₽</b> | МРЦ 65 000 ₽\n"
-        "• H=1.8 м: ОПТ <b>76 000 ₽</b> | МРЦ 95 000 ₽\n"
-        "• H=2.7 м: ОПТ <b>104 000 ₽</b> | МРЦ 130 000 ₽\n"
-        "• H=3.6 м: ОПТ <b>124 000 ₽</b> | МРЦ 155 000 ₽\n"
-        "• H=4.4 м: ОПТ <b>156 000 ₽</b> | МРЦ 195 000 ₽\n"
-        "• H=5.1 м: ОПТ <b>176 000 ₽</b> | МРЦ 220 000 ₽\n\n"
-        "🔹 <b>Диаметр 1.8 м (D=1.8):</b>\n"
-        "• H=0.9 м: ОПТ <b>72 000 ₽</b> | МРЦ 90 000 ₽\n"
-        "• H=1.8 м: ОПТ <b>104 000 ₽</b> | МРЦ 130 000 ₽\n"
-        "• H=2.7 м: ОПТ <b>152 000 ₽</b> | МРЦ 190 000 ₽\n"
-        "• H=3.6 м: ОПТ <b>184 000 ₽</b> | МРЦ 230 000 ₽\n"
-        "• H=4.4 м: ОПТ <b>232 000 ₽</b> | МРЦ 290 000 ₽\n"
-        "• H=5.1 м: ОПТ <b>280 000 ₽</b> | МРЦ 350 000 ₽"
-    )
+    "m1": {
+        "title": "Мишка 1 (Ø1050)",
+        "text": (
+            "🐻 <b>КЕССОНЫ МИШКА 1 (Ø1050 мм)</b>\n"
+            "<i>Материал: первичный монолитный полипропилен</i>\n\n"
+            "🔹 <b>Мишка 1 (H=2000 мм):</b>\n"
+            "• Проходной (без фланца): ОПТ <b>36 650 ₽</b> | МРЦ 58 000 ₽\n"
+            "• Фланец 125/133 мм: ОПТ <b>39 650 ₽</b> | МРЦ 61 000 ₽\n"
+            "• Фланец 159 мм: ОПТ <b>42 650 ₽</b> | МРЦ 64 000 ₽\n\n"
+            "🔹 <b>Мишка 1 LONG (H=2500 мм):</b>\n"
+            "• Проходной (без фланца): ОПТ <b>49 650 ₽</b> | МРЦ 78 000 ₽\n"
+            "• Фланец 125/133 мм: ОПТ <b>52 650 ₽</b> | МРЦ 81 000 ₽\n"
+            "• Фланец 159 мм: ОПТ <b>56 650 ₽</b> | МРЦ 85 000 ₽\n\n"
+            "<i>* Сгоны d32 мм (комплект 4 шт.): +1 520 ₽</i>"
+        )
+    },
+    "m2": {
+        "title": "Мишка 2 (Ø1300)",
+        "text": (
+            "🐻 <b>КЕССОНЫ МИШКА 2 (Ø1300 мм)</b>\n"
+            "<i>Материал: первичный монолитный полипропилен</i>\n\n"
+            "🔹 <b>Мишка 2 (H=2000 мм):</b>\n"
+            "• Проходной (без фланца): ОПТ <b>47 700 ₽</b> | МРЦ 75 000 ₽\n"
+            "• Фланец 125/133 мм: ОПТ <b>50 700 ₽</b> | МРЦ 78 000 ₽\n"
+            "• Фланец 159 мм: ОПТ <b>53 300 ₽</b> | МРЦ 82 000 ₽\n\n"
+            "🔹 <b>Мишка 2 LONG (H=2500 мм):</b>\n"
+            "• Проходной (без фланца): ОПТ <b>57 800 ₽</b> | МРЦ 89 000 ₽\n"
+            "• Фланец 125/133 мм: ОПТ <b>65 000 ₽</b> | МРЦ 95 000 ₽\n"
+            "• Фланец 159 мм: ОПТ <b>68 800 ₽</b> | МРЦ 100 000 ₽\n\n"
+            "<i>* Сгоны d32 мм (комплект 4 шт.): +1 520 ₽</i>"
+        )
+    },
+    "m3": {
+        "title": "Мишка 3 (Ø1600)",
+        "text": (
+            "🐻 <b>КЕССОНЫ МИШКА 3 (Ø1600 мм)</b>\n"
+            "<i>Материал: первичный монолитный полипропилен</i>\n\n"
+            "🔹 <b>Мишка 3 (H=2000 мм):</b>\n"
+            "• Проходной (без фланца): ОПТ <b>70 000 ₽</b> | МРЦ 101 000 ₽\n"
+            "• Фланец 125/133 мм: ОПТ <b>76 500 ₽</b> | МРЦ 115 000 ₽\n"
+            "• Фланец 159 мм: ОПТ <b>81 300 ₽</b> | МРЦ 124 600 ₽\n\n"
+            "🔹 <b>Мишка 3 LONG (H=2500 мм):</b>\n"
+            "• Проходной (без фланца): ОПТ <b>113 200 ₽</b> | МРЦ 154 300 ₽\n"
+            "• Фланец 125/133 мм: ОПТ <b>118 300 ₽</b> | МРЦ 161 200 ₽\n"
+            "• Фланец 159 мм: ОПТ <b>124 200 ₽</b> | МРЦ 166 100 ₽\n\n"
+            "<i>* Сгоны d32 мм (комплект 4 шт.): +1 520 ₽</i>"
+        )
+    },
+    "m4": {
+        "title": "Мишка 4 (Ø2100)",
+        "text": (
+            "🐻 <b>КЕССОНЫ МИШКА 4 (Ø2100 мм)</b>\n"
+            "<i>Материал: первичный монолитный полипропилен</i>\n\n"
+            "🔹 <b>Мишка 4 (H=2000 мм):</b>\n"
+            "• Проходной (без фланца): ОПТ <b>145 900 ₽</b> | РРЦ 191 600 ₽\n"
+            "• Фланец 125/133 мм: ОПТ <b>156 000 ₽</b> | РРЦ 194 600 ₽\n"
+            "• Фланец 159 мм: ОПТ <b>164 111 ₽</b> | РРЦ 199 600 ₽\n\n"
+            "🔹 <b>Мишка 4 LONG (H=2500 мм):</b>\n"
+            "• Проходной (без фланца): ОПТ <b>199 000 ₽</b> | РРЦ 245 600 ₽\n"
+            "• Фланец 125/133 мм: ОПТ <b>204 050 ₽</b> | РРЦ 250 600 ₽\n"
+            "• Фланец 159 мм: ОПТ <b>213 000 ₽</b> | РРЦ 287 400 ₽\n\n"
+            "<i>* Сгоны d32 мм (комплект 4 шт.): +1 520 ₽</i>"
+        )
+    },
+    "rings": {
+        "title": "Вставки в колодцы",
+        "text": (
+            "🧱 <b>ГЕРМЕТИЧНАЯ ВСТАВКА УСИЛЕННАЯ + ЛЕСТНИЦА В ЖБ КОЛОДЕЦ</b>\n"
+            "<i>Пластиковые вставки (D = диаметр, H = высота):</i>\n\n"
+            "🔹 <b>Диаметр 0.9 м (D=0.9):</b>\n"
+            "• H=0.9 м: ОПТ <b>36 000 ₽</b> | МРЦ 45 000 ₽\n"
+            "• H=1.8 м: ОПТ <b>52 000 ₽</b> | МРЦ 65 000 ₽\n"
+            "• H=2.7 м: ОПТ <b>76 000 ₽</b> | МРЦ 95 000 ₽\n"
+            "• H=3.6 м: ОПТ <b>92 000 ₽</b> | МРЦ 115 000 ₽\n"
+            "• H=4.4 м: ОПТ <b>116 000 ₽</b> | МРЦ 145 000 ₽\n"
+            "• H=5.1 м: ОПТ <b>140 000 ₽</b> | МРЦ 175 000 ₽\n\n"
+            "🔹 <b>Диаметр 1.4 м (D=1.4):</b>\n"
+            "• H=0.9 м: ОПТ <b>52 000 ₽</b> | МРЦ 65 000 ₽\n"
+            "• H=1.8 м: ОПТ <b>76 000 ₽</b> | МРЦ 95 000 ₽\n"
+            "• H=2.7 м: ОПТ <b>104 000 ₽</b> | МРЦ 130 000 ₽\n"
+            "• H=3.6 м: ОПТ <b>124 000 ₽</b> | МРЦ 155 000 ₽\n"
+            "• H=4.4 м: ОПТ <b>156 000 ₽</b> | МРЦ 195 000 ₽\n"
+            "• H=5.1 м: ОПТ <b>176 000 ₽</b> | МРЦ 220 000 ₽\n\n"
+            "🔹 <b>Диаметр 1.8 м (D=1.8):</b>\n"
+            "• H=0.9 м: ОПТ <b>72 000 ₽</b> | МРЦ 90 000 ₽\n"
+            "• H=1.8 м: ОПТ <b>104 000 ₽</b> | МРЦ 130 000 ₽\n"
+            "• H=2.7 м: ОПТ <b>152 000 ₽</b> | МРЦ 190 000 ₽\n"
+            "• H=3.6 м: ОПТ <b>184 000 ₽</b> | МРЦ 230 000 ₽\n"
+            "• H=4.4 м: ОПТ <b>232 000 ₽</b> | МРЦ 290 000 ₽\n"
+            "• H=5.1 м: ОПТ <b>280 000 ₽</b> | МРЦ 350 000 ₽"
+        )
+    }
 }
 
-# Тексты интерфейса опроса
 LANG_TEXTS = {
     "ru": {
         "lang_name": "Русский",
@@ -188,8 +206,9 @@ LANG_TEXTS = {
         "err_yield": "⚠️ Введите дебит числом (например: 2.5):",
         "q_houses": "3️⃣ <b>Сколько строений (домов) подключаем?</b>\n<i>(введите число, например: 1 или 2)</i>",
         "err_houses": "⚠️ Введите количество домов целым числом (например: 1):",
-        "q_dist_single": "4️⃣ <b>Расстояние от скважины до дома (в метрах):</b>\n<i>(например: 15)</i>",
-        "q_dist_first": "4️⃣ <b>Расстояние от скважины до Дома №1 (в метрах):</b>\n<i>(например: 15)</i>",
+        "q_kesson": "4️⃣ <b>Какой кессон установить?</b>\nВыберите конкретную модель или доверьте подбор продавцу:",
+        "q_dist_single": "5️⃣ <b>Расстояние от скважины до дома (в метрах):</b>\n<i>(например: 15)</i>",
+        "q_dist_first": "5️⃣ <b>Расстояние от скважины до Дома №1 (в метрах):</b>\n<i>(например: 15)</i>",
         "q_dist_next": "▫️ <b>Расстояние от скважины до Дома №{idx} (в метрах):</b>\n<i>(например: 25)</i>",
         "err_dist": "⚠️ Введите расстояние числом метров (например: 15):",
         "extras_title": "📦 <b>Нужны ли дополнительные расходные материалы с собой?</b>\nВыберите позиции кнопками ниже (нажмите «Готово», когда выберете всё необходимое):",
@@ -199,7 +218,8 @@ LANG_TEXTS = {
         "unit_m": "м",
         "unit_pcs": "шт.",
         "btn_done": "✅ Готово / Завершить заказ",
-        "done": "✅ <b>Спасибо! Запрос принят.</b>\nСпецификация и доп. материалы переданы на склад, комплектуем заказ к вашему приезду."
+        "done": "✅ <b>Спасибо! Запрос принят.</b>\nСпецификация и доп. материалы переданы на склад, комплектуем заказ к вашему приезду.",
+        "kesson_auto": "🤝 На выбор продавца (автоподбор)"
     },
     "tj": {
         "lang_name": "Тоҷикӣ",
@@ -209,8 +229,9 @@ LANG_TEXTS = {
         "err_yield": "⚠️ Ҳосилнокиро бо рақам нависед (масалан: 2.5):",
         "q_houses": "3️⃣ <b>Чанд хонаро васл кардан лозим аст?</b>\n<i>(рақам нависед, масалан: 1 ё 2)</i>",
         "err_houses": "⚠️ Шумораи хонаҳоро бо рақами бутун нависед (масалан: 1):",
-        "q_dist_single": "4️⃣ <b>Масофа аз чоҳ то хона (бо метр):</b>\n<i>(масалан: 15)</i>",
-        "q_dist_first": "4️⃣ <b>Масофа аз чоҳ то Хонаи №1 (бо метр):</b>\n<i>(масалан: 15)</i>",
+        "q_kesson": "4️⃣ <b>Кадом кессон лозим аст?</b>\nМоделро интихоб кунед ё ба ихтиёри фурӯшанда гузоред:",
+        "q_dist_single": "5️⃣ <b>Масофа аз чоҳ то хона (бо метр):</b>\n<i>(масалан: 15)</i>",
+        "q_dist_first": "5️⃣ <b>Масофа аз чоҳ то Хонаи №1 (бо метр):</b>\n<i>(масалан: 15)</i>",
         "q_dist_next": "▫️ <b>Масофа аз чоҳ то Хонаи №{idx} (бо метр):</b>\n<i>(масалан: 25)</i>",
         "err_dist": "⚠️ Масофаро бо рақам нависед (масалан: 15):",
         "extras_title": "📦 <b>Оё маводи иловагӣ лозим аст?</b>\nАз тугмаҳои зерин интихоб кунед (баъди тамом кардан тугмаи «Тайёр»-ро пахш кунед):",
@@ -220,7 +241,8 @@ LANG_TEXTS = {
         "unit_m": "м",
         "unit_pcs": "дона",
         "btn_done": "✅ Тайёр / Фиристодани фармоиш",
-        "done": "✅ <b>Ташаккур! Дархости шумо қабул шуд.</b>\nМаълумот ва маводи иловагӣ ба анбор супорида шуд, мо борро тайёр мекунем."
+        "done": "✅ <b>Ташаккур! Дархости шумо қабул шуд.</b>\nМаълумот ва маводи иловагӣ ба анбор супорида шуд, мо борро тайёр мекунем.",
+        "kesson_auto": "🤝 Ба интихоби фурӯшанда (автоматӣ)"
     },
     "uz": {
         "lang_name": "Oʻzbekcha",
@@ -230,8 +252,9 @@ LANG_TEXTS = {
         "err_yield": "⚠️ Quvvatni raqamda kiriting (masalan: 2.5):",
         "q_houses": "3️⃣ <b>Nechta uyga suv ulanadi?</b>\n<i>(faqat raqam kiriting, masalan: 1 yoki 2)</i>",
         "err_houses": "⚠️ Uylar sonini butun raqamda kiriting (masalan: 1):",
-        "q_dist_single": "4️⃣ <b>Quduqdan uygacha bo'lgan masofa (metrda):</b>\n<i>(masalan: 15)</i>",
-        "q_dist_first": "4️⃣ <b>Quduqdan 1-raqamli uygacha masofa (metrda):</b>\n<i>(masalan: 15)</i>",
+        "q_kesson": "4️⃣ <b>Qaysi kesson o'rnatiladi?</b>\nModelni tanlang yoki sotuvchi tanloviga qoldiring:",
+        "q_dist_single": "5️⃣ <b>Quduqdan uygacha bo'lgan masofa (metrda):</b>\n<i>(masalan: 15)</i>",
+        "q_dist_first": "5️⃣ <b>Quduqdan 1-raqamli uygacha masofa (metrda):</b>\n<i>(masalan: 15)</i>",
         "q_dist_next": "▫️ <b>Quduqdan {idx}-raqamli uygacha masofa (metrda):</b>\n<i>(masalan: 25)</i>",
         "err_dist": "⚠️ Masofani raqamda kiriting (masalan: 15):",
         "extras_title": "📦 <b>Qo'shimcha sarflanuvchi materiallar kerakmi?</b>\nKerakli mahsulotlarni tugmalar orqali tanlang (tugatgach «Tayyor» tugmasini bosing):",
@@ -241,7 +264,8 @@ LANG_TEXTS = {
         "unit_m": "m",
         "unit_pcs": "dona",
         "btn_done": "✅ Tayyor / Buyurtmani yuborish",
-        "done": "✅ <b>Rahmat! Buyurtmangiz qabul qilindi.</b>\nMaʼlumot omborga yuborildi, yetib kelishingizga mahsulotlarni yigʻishni boshladik."
+        "done": "✅ <b>Rahmat! Buyurtmangiz qabul qilindi.</b>\nMaʼlumot omborga yuborildi, yetib kelishingizga mahsulotlarni yigʻishni boshladik.",
+        "kesson_auto": "🤝 Sotuvchi tanloviga (avtomatik)"
     },
     "hy": {
         "lang_name": "Հայերեն",
@@ -251,8 +275,9 @@ LANG_TEXTS = {
         "err_yield": "⚠️ Արտադրողականությունը գրեք թվով (օրինակ՝ 2.5):",
         "q_houses": "3️⃣ <b>Քանի՞ տուն պետք է միացնել:</b>\n<i>(գրեք թիվ, օրինակ՝ 1 կամ 2)</i>",
         "err_houses": "⚠️ Տների քանակը գրեք ամբողջ թվով (օրինակ՝ 1):",
-        "q_dist_single": "4️⃣ <b>Հեռավորությունը հորատանցքից մինչև տուն (մետրերով):</b>\n<i>(օրինակ՝ 15)</i>",
-        "q_dist_first": "4️⃣ <b>Հեռավորությունը հորատանցքից մինչև Տուն №1 (մետրերով):</b>\n<i>(օրինակ՝ 15)</i>",
+        "q_kesson": "4️⃣ <b>Ինչպիսի՞ կեսոն տեղադրել:</b>\nԸնտրեք մոդելը կամ թողեք վաճառողի ընտրությանը:",
+        "q_dist_single": "5️⃣ <b>Հեռավորությունը հորատանցքից մինչև տուն (մետրերով):</b>\n<i>(օրինակ՝ 15)</i>",
+        "q_dist_first": "5️⃣ <b>Հեռավորությունը հորատանցքից մինչև Տուն №1 (մետրերով):</b>\n<i>(օրինակ՝ 15)</i>",
         "q_dist_next": "▫️ <b>Հեռավորությունը հորատանցքից մինչև Տուն №{idx} (մետրերով):</b>\n<i>(օրինակ՝ 25)</i>",
         "err_dist": "⚠️ Հեռավորությունը գրեք թվով (օրինակ՝ 15):",
         "extras_title": "📦 <b>Լրացուցիչ նյութեր անհրաժե՞շտ են:</b>\nԸնտրեք անհրաժեշտ ապրանքները (ավարտելուց հետո սեղմեք «Պատրաստ է»):",
@@ -262,7 +287,8 @@ LANG_TEXTS = {
         "unit_m": "մ",
         "unit_pcs": "հատ",
         "btn_done": "✅ Պատրաստ է / Ուղարկել",
-        "done": "✅ <b>Շնորհակալություն: Ձեր հարցումն ընդունված է:</b>\nՏվյալները փոխանցվել են պահեստ, սկսում ենք ապրանքի հավաքումը:"
+        "done": "✅ <b>Շնորհակալություն: Ձեր հարցումն ընդունված է:</b>\nՏվյալները փոխանցվել են պահեստ, սկսում ենք ապրանքի հավաքումը:",
+        "kesson_auto": "🤝 Վաճառողի ընտրությամբ (ավտոմատ)"
     },
     "ky": {
         "lang_name": "Кыргызча",
@@ -272,8 +298,9 @@ LANG_TEXTS = {
         "err_yield": "⚠️ Кубаттуулукту сан менен жазыңыз (мисалы: 2.5):",
         "q_houses": "3️⃣ <b>Канча үйгө суу туташтырылат?</b>\n<i>(сан жазыңыз, мисалы: 1 же 2)</i>",
         "err_houses": "⚠️ Үйлөрдүн санын бүтүн сан менен жазыңыз (мисалы: 1):",
-        "q_dist_single": "4️⃣ <b>Скважинадан үйгө чейинки аралык (метр менен):</b>\n<i>(мисалы: 15)</i>",
-        "q_dist_first": "4️⃣ <b>Скважинадан №1 үйгө чейинки аралык (метр менен):</b>\n<i>(мисалы: 15)</i>",
+        "q_kesson": "4️⃣ <b>Кайсы кессон орнотулат?</b>\nМоделди тандаңыз же сатуучунун тандоосуна калтырыңыз:",
+        "q_dist_single": "5️⃣ <b>Скважинадан үйгө чейинки аралык (метр менен):</b>\n<i>(мисалы: 15)</i>",
+        "q_dist_first": "5️⃣ <b>Скважинадан №1 үйгө чейинки аралык (метр менен):</b>\n<i>(мисалы: 15)</i>",
         "q_dist_next": "▫️ <b>Скважинадан №{idx} үйгө чейинки аралык (метр менен):</b>\n<i>(мисалы: 25)</i>",
         "err_dist": "⚠️ Аралыкты сан менен жазыңыз (мисалы: 15):",
         "extras_title": "📦 <b>Кошумча керектелүүчү материалдар керекпи?</b>\nТөмөнкү баскычтардан тандаңыз (бүткөндөн кийин «Даяр» баскычын басыңыз):",
@@ -283,9 +310,20 @@ LANG_TEXTS = {
         "unit_m": "м",
         "unit_pcs": "даана",
         "btn_done": "✅ Даяр / Буйрутманы жөнөтүү",
-        "done": "✅ <b>Ырахмат! Суроо-талап кабыл алынды.</b>\nМаалымат кампага жөнөтүлдү, сиз келгенче жүктү топтой баштайбыз."
+        "done": "✅ <b>Ырахмат! Суроо-талап кабыл алынды.</b>\nМаалымат кампага жөнөтүлдү, сиз келгенче жүктү топтой баштайбыз.",
+        "kesson_auto": "🤝 Сатуучунун тандоосуна (автоматтык)"
     }
 }
+
+
+def send_to_all_admins(bot, text: str):
+    """Отправляет уведомление обоим администраторам."""
+    for a_id in ADMIN_CHAT_IDS:
+        try:
+            bot.send_message(a_id, text, parse_mode="HTML")
+            print(f"[SUCCESS] Отправлено админу: {a_id}")
+        except Exception as e:
+            print(f"[ERROR] Не удалось отправить админу {a_id}: {e}")
 
 
 def build_warehouse_checklist(data: dict) -> str:
@@ -295,6 +333,7 @@ def build_warehouse_checklist(data: dict) -> str:
     houses = data["houses"]
     distances = data["distances"]
     extras = data.get("extras", {})
+    selected_kesson = data.get("chosen_kesson", "auto")
     user_lang = LANG_TEXTS.get(data.get("lang", "ru"), {}).get("lang_name", "Русский")
 
     total_distance = sum(distances)
@@ -314,12 +353,16 @@ def build_warehouse_checklist(data: dict) -> str:
     else:
         pump_model = "Насос высоконапорный промышленной серии (напор 120+ м)"
 
-    if houses == 1:
-        kesson_name = "Кессон пластиковый «МИШКА-2» (1000х2000 мм)"
-        branch_tees = 1
+    if selected_kesson == "auto":
+        if houses == 1:
+            kesson_name = "Кессон пластиковый «МИШКА-2» (1000х2000 мм) [Автоподбор продавца]"
+            branch_tees = 1
+        else:
+            kesson_name = f"Кессон пластиковый «МИШКА-3» (увеличенный под {houses} вывода) [Автоподбор продавца]"
+            branch_tees = houses
     else:
-        kesson_name = f"Кессон пластиковый «МИШКА-3» (увеличенный с гребёнкой на {houses} вывода)"
-        branch_tees = houses
+        kesson_name = f"Кессон «{selected_kesson}» [Выбран монтажником вручную]"
+        branch_tees = max(1, houses)
 
     if houses == 1:
         tank_spec = "Гидроаккумулятор 80-100 л (вертикальный, фланец нерж)"
@@ -367,7 +410,7 @@ def build_warehouse_checklist(data: dict) -> str:
         f"{routes_detail}\n"
         f"🛠 <b>ОСНОВНОЙ КОМПЛЕКТ НА ОТГРУЗКУ:</b>\n\n"
         f"<b>1. Кессон и устье:</b>\n"
-        f"  ▫️ {kesson_name} — 1 шт.\n"
+        f"  ▫️ <b>{kesson_name}</b> — 1 шт.\n"
         f"  ▫️ Муфта обсадной трубы герметичная — 1 шт.\n"
         f"  ▫️ Оголовок скважинный 125-133/32 — 1 шт.\n"
         f"  ▫️ Гермовводы для ПНД 32 в стенки кессона — {houses + 1} шт. (трассы + полив)\n\n"
@@ -428,6 +471,22 @@ def get_price_categories_keyboard():
     return kb
 
 
+def get_kesson_choice_keyboard(lang):
+    t = LANG_TEXTS.get(lang, LANG_TEXTS["ru"])
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    b_auto = types.InlineKeyboardButton(t["kesson_auto"], callback_data="kchoice_auto")
+    b_m1 = types.InlineKeyboardButton("Мишка 1 (Ø1050)", callback_data="kchoice_Мишка 1")
+    b_m2 = types.InlineKeyboardButton("Мишка 2 (Ø1300)", callback_data="kchoice_Мишка 2")
+    b_m3 = types.InlineKeyboardButton("Мишка 3 (Ø1600)", callback_data="kchoice_Мишка 3")
+    b_m4 = types.InlineKeyboardButton("Мишка 4 (Ø2100)", callback_data="kchoice_Мишка 4")
+    b_long = types.InlineKeyboardButton("Мишка LONG (H=2500)", callback_data="kchoice_Мишка LONG")
+    kb.add(b_auto)
+    kb.add(b_m1, b_m2)
+    kb.add(b_m3, b_m4)
+    kb.add(b_long)
+    return kb
+
+
 def get_extras_keyboard(chat_id, lang):
     t = LANG_TEXTS.get(lang, LANG_TEXTS["ru"])
     session = user_calc_sessions.get(chat_id, {})
@@ -456,7 +515,7 @@ def get_extras_keyboard(chat_id, lang):
 
 def register_calc_handlers(bot):
 
-    # Команда просмотра прайс-листа
+    # 1. Прайс-лист и воронка продаж
     @bot.message_handler(commands=['price', 'прайс'])
     def handle_price_cmd(message):
         bot.reply_to(
@@ -471,10 +530,20 @@ def register_calc_handlers(bot):
     def handle_price_view(call):
         cat = call.data.replace("price_view_", "")
         bot.answer_callback_query(call.id)
-        text = PRICE_DATA.get(cat, "Раздел не найден.")
-        back_kb = types.InlineKeyboardMarkup()
-        back_kb.add(types.InlineKeyboardButton("⬅️ Назад ко всем моделям", callback_data="price_back_main"))
-        bot.send_message(call.message.chat.id, text, reply_markup=back_kb, parse_mode="HTML")
+        info = PRICE_DATA.get(cat)
+
+        if not info:
+            bot.send_message(call.message.chat.id, "Раздел не найден.")
+            return
+
+        kb = types.InlineKeyboardMarkup(row_width=1)
+        if cat in ["m1", "m2", "m3", "m4"]:
+            btn_buy_only = types.InlineKeyboardButton(f"🛒 Заказать только {info['title']}", callback_data=f"order_kesson_only_{cat}")
+            btn_bundle = types.InlineKeyboardButton(f"🔧 Собрать комплект под ключ к {info['title']}", callback_data=f"bundle_start_{cat}")
+            kb.add(btn_buy_only, btn_bundle)
+
+        kb.add(types.InlineKeyboardButton("⬅️ Назад ко всем моделям", callback_data="price_back_main"))
+        bot.send_message(call.message.chat.id, info["text"], reply_markup=kb, parse_mode="HTML")
 
     @bot.callback_query_handler(func=lambda call: call.data == "price_back_main")
     def handle_price_back(call):
@@ -486,7 +555,56 @@ def register_calc_handlers(bot):
             parse_mode="HTML"
         )
 
-    # Калькулятор скважины
+    # Заказ только кессона из карточки прайса
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("order_kesson_only_"))
+    def handle_order_kesson_only(call):
+        cat = call.data.replace("order_kesson_only_", "")
+        bot.answer_callback_query(call.id)
+        info = PRICE_DATA.get(cat, {"title": "Кессон МИШКА"})
+
+        u_tag = f"@{call.from_user.username}" if call.from_user.username else "нет username"
+        u_name = f"{call.from_user.first_name or ''} {call.from_user.last_name or ''}".strip() or "Клиент"
+
+        bot.send_message(
+            call.message.chat.id,
+            f"✅ <b>Заявка на {info['title']} принята!</b>\nМенеджер склада получил уведомление и свяжется с вами для оформления отгрузки.",
+            parse_mode="HTML"
+        )
+
+        admin_alert = (
+            f"🚨 <b>БЫСТРЫЙ ЗАКАЗ КЕССОНА ИЗ ПРАЙСА!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📦 <b>Модель:</b> {info['title']}\n"
+            f"👤 <b>Заказчик:</b> {u_name} ({u_tag})\n"
+            f"🆔 ID чата: <code>{call.message.chat.id}</code>\n"
+            f"<i>Заказан только кессон отдельно без обвязки скважины.</i>"
+        )
+        send_to_all_admins(bot, admin_alert)
+
+    # Собрать комплект под ключ к конкретному кессону из прайса
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("bundle_start_"))
+    def handle_bundle_start(call):
+        cat = call.data.replace("bundle_start_", "")
+        bot.answer_callback_query(call.id)
+        info = PRICE_DATA.get(cat, {"title": "Кессон МИШКА"})
+
+        chat_id = call.message.chat.id
+        user_calc_sessions[chat_id] = {
+            "lang": "ru",
+            "distances": [],
+            "extras": {},
+            "chosen_kesson": info["title"]
+        }
+
+        bot.send_message(
+            chat_id,
+            f"🔧 <b>Сборка комплекта под ключ к «{info['title']}»:</b>\n\n"
+            f"1️⃣ <b>Какая глубина скважины в метрах?</b> (например: <code>40</code>):",
+            parse_mode="HTML"
+        )
+        bot.register_next_step_handler(call.message, lambda m: step_depth(m, bot, "ru"))
+
+    # 2. Общий опросник
     @bot.message_handler(commands=['calc', 'smeta'])
     def start_calc(message):
         bot.reply_to(
@@ -504,7 +622,8 @@ def register_calc_handlers(bot):
         user_calc_sessions[chat_id] = {
             "lang": chosen_lang,
             "distances": [],
-            "extras": {}
+            "extras": {},
+            "chosen_kesson": "auto"
         }
 
         bot.answer_callback_query(call.id)
@@ -554,15 +673,47 @@ def register_calc_handlers(bot):
             user_calc_sessions[message.chat.id]["houses"] = val
             user_calc_sessions[message.chat.id]["distances"] = []
 
-            if val == 1:
-                bot.reply_to(message, t["q_dist_single"], parse_mode="HTML")
-                bot.register_next_step_handler(message, lambda m: step_single_distance(m, bot, lang))
+            # Если модель кессона уже выбрана через прайс
+            if user_calc_sessions[message.chat.id].get("chosen_kesson") not in [None, "auto"]:
+                ask_distances(message, bot, lang)
             else:
-                bot.reply_to(message, t["q_dist_first"], parse_mode="HTML")
-                bot.register_next_step_handler(message, lambda m: step_multi_distance(m, bot, lang, house_idx=1))
+                bot.reply_to(
+                    message,
+                    t["q_kesson"],
+                    reply_markup=get_kesson_choice_keyboard(lang),
+                    parse_mode="HTML"
+                )
         except (ValueError, TypeError):
             bot.reply_to(message, t["err_houses"])
             bot.register_next_step_handler(message, lambda m: step_houses(m, bot, lang))
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("kchoice_"))
+    def handle_kesson_choice(call):
+        k_val = call.data.replace("kchoice_", "")
+        chat_id = call.message.chat.id
+        session = user_calc_sessions.get(chat_id, {})
+        lang = session.get("lang", "ru")
+
+        session["chosen_kesson"] = "auto" if k_val == "auto" else k_val
+        bot.answer_callback_query(call.id)
+
+        try:
+            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+
+        ask_distances(call.message, bot, lang)
+
+    def ask_distances(message, bot, lang):
+        t = LANG_TEXTS.get(lang, LANG_TEXTS["ru"])
+        houses = user_calc_sessions[message.chat.id]["houses"]
+
+        if houses == 1:
+            bot.send_message(message.chat.id, t["q_dist_single"], parse_mode="HTML")
+            bot.register_next_step_handler(message, lambda m: step_single_distance(m, bot, lang))
+        else:
+            bot.send_message(message.chat.id, t["q_dist_first"], parse_mode="HTML")
+            bot.register_next_step_handler(message, lambda m: step_multi_distance(m, bot, lang, house_idx=1))
 
     def step_single_distance(message, bot, lang):
         if message.text and message.text.startswith('/'):
@@ -670,8 +821,4 @@ def register_calc_handlers(bot):
         bot.send_message(chat_id, t["done"], parse_mode="HTML")
 
         checklist = build_warehouse_checklist(session)
-        try:
-            bot.send_message(ADMIN_CHAT_ID, checklist, parse_mode="HTML")
-            print(f"[SUCCESS] Сборочный лист отправлен админу {ADMIN_CHAT_ID}")
-        except Exception as e:
-            print(f"[ERROR] Ошибка отправки админу {ADMIN_CHAT_ID}: {e}")
+        send_to_all_admins(bot, checklist)
