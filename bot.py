@@ -1,6 +1,7 @@
 import os
 import time
 import threading
+from datetime import datetime, timezone, timedelta
 from flask import Flask
 import telebot
 from google import genai
@@ -26,6 +27,19 @@ def health_check():
     return "Bot is alive!", 200
 
 chat_modes = {}
+daily_chat_logs = {}
+
+# Заготовленный тестовый лог "вчерашнего дня" для мгновенной проверки
+MOCK_YESTERDAY_LOGS = [
+    {"user": "@Bondar_17", "text": "Здорово всем, кто сегодня на тренировку подтягивается?"},
+    {"user": "Никита Кардаш", "text": "Нормас, я на смене в ФОКе до вечера. Турникеты держу, хаха"},
+    {"user": "@Bondar_17", "text": "Опять в каморке сидишь кроссворды гадаешь за двадцатку?"},
+    {"user": "Диана", "text": "Слышь Бондарь, закрой свой рот нищий! Он начальник безопасности объекта! Завидуй молча со своими копейками!"},
+    {"user": "Никита Кардаш", "text": "Хаха Витек че ты пыхтишь. Щас на Вайлдберриз халява пиздец кроссы урвал за 3500"},
+    {"user": "Участник", "text": "Ребят, хорош сраться, кто знает где нормальный парфюм взять в подарок?"},
+    {"user": "Диана", "text": "Мне мой вчера Tom Ford подогнал, а вы дальше нюхайте с рынка тестеры нищеброды"},
+    {"user": "Никита Кардаш", "text": "Бля у меня зп завтра только, так бы на таху скинулись и стартанули"}
+]
 
 CHARACTERS = {
     "дефолт": "",
@@ -204,6 +218,79 @@ def check_group_trigger(message, text: str) -> bool:
 
     return is_private or is_mentioned or is_reply_to_bot or is_called_by_name
 
+def build_summary_from_messages(logs) -> str:
+    chat_transcript = "\n".join([f"{item['user']}: {item['text']}" for item in logs[-150:]])
+
+    summary_prompt = (
+        "Перед тобой хроника сообщений из Telegram-чата:\n"
+        f"\"\"\"\n{chat_transcript}\n\"\"\"\n\n"
+        "Составь смешной, саркастичный и живой 'ИТОГ ДНЯ В ЧАТЕ' в стиле вечернего выпуска новостей или стендапа.\n"
+        "Требования:\n"
+        "1. Кратко и с юмором перескажи главные драмы, споры или суету за сегодня.\n"
+        "2. Раздай шуточные номинации участникам (например: 'Суетолог дня', 'Элита с Вайлдберриз', 'Мисс токсичность' и т.д.).\n"
+        "3. Финальная смешная мораль или напутствие на ночь.\n"
+        "Не пиши сухих отчетов, пиши угарно и остроумно."
+    )
+    return generate_ai_response(summary_prompt)
+
+def scheduler_thread():
+    """Фоновый поток: проверяет время и ровно в 23:00 по Москве публикует итог дня."""
+    print("Планировщик итогов дня запущен (цель: 23:00 MSK)...")
+    moscow_tz = timezone(timedelta(hours=3))
+
+    while True:
+        try:
+            now = datetime.now(moscow_tz)
+            # Срабатывание ровно в 23:00
+            if now.hour == 23 and now.minute == 0:
+                print(f"[{now.strftime('%H:%M:%S')}] Публикация вечерних итогов дня...")
+                chats_to_process = list(daily_chat_logs.keys())
+                for c_id in chats_to_process:
+                    logs = daily_chat_logs.get(c_id, [])
+                    if logs and len(logs) >= 3:
+                        try:
+                            summary_text = build_summary_from_messages(logs)
+                            header = "🌙 <b>ВЕЧЕРНИЙ ИТОГ ДНЯ (23:00):</b>\n\n"
+                            bot.send_message(c_id, header + summary_text, parse_mode="HTML")
+                        except Exception as e:
+                            print(f"Ошибка отправки итогов в чат {c_id}: {e}")
+                    daily_chat_logs[c_id] = []
+                time.sleep(70)
+            else:
+                time.sleep(25)
+        except Exception as e:
+            print(f"Ошибка в цикле планировщика: {e}")
+            time.sleep(10)
+
+@bot.message_handler(commands=['summary_test', 'тест_итоги'])
+def handle_test_summary(message):
+    """Мгновенная проверка генерации итогов на вчерашнем тестовом материале."""
+    bot.send_chat_action(message.chat.id, "typing")
+    try:
+        summary_text = build_summary_from_messages(MOCK_YESTERDAY_LOGS)
+        bot.reply_to(
+            message,
+            f"🧪 <b>ТЕСТОВЫЙ ИТОГ ВЧЕРАШНЕГО ДНЯ:</b>\n\n{summary_text}",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        bot.reply_to(message, f"Ошибка: {e}")
+
+@bot.message_handler(commands=['summary', 'итоги'])
+def handle_live_summary(message):
+    """Итоги на основе реальных сообщений, записанных за сегодня."""
+    bot.send_chat_action(message.chat.id, "typing")
+    logs = daily_chat_logs.get(message.chat.id, [])
+    if not logs or len(logs) < 3:
+        bot.reply_to(message, "Сегодня в чате пока слишком мало сообщений для полноценного дайджеста. Проверь через <code>/summary_test</code>!", parse_mode="HTML")
+        return
+
+    try:
+        summary_text = build_summary_from_messages(logs)
+        bot.reply_to(message, f"📊 <b>ТЕКУЩИЙ ИТОГ ЧАТА:</b>\n\n{summary_text}", parse_mode="HTML")
+    except Exception as e:
+        bot.reply_to(message, f"Ошибка: {e}")
+
 @bot.message_handler(commands=['mode', 'персонаж'])
 def handle_mode_switch(message):
     text = message.text or ""
@@ -222,8 +309,10 @@ def handle_mode_switch(message):
             message,
             f"Текущий режим чата: <b>{current.upper()}</b>\n\n"
             f"Доступные роли:\n{modes_list}\n\n"
-            f"Чтобы включить развернутые ответы: <code>/mode умный</code> или <code>/mode парфюмер</code>\n"
-            f"Чтобы включить компактные ответы: <code>/mode дефолт</code>",
+            f"Команды дайджеста:\n"
+            f"• <code>/summary_test</code> — проверить вчерашний итог прямо сейчас\n"
+            f"• <code>/summary</code> — итоги из текущей переписки\n"
+            f"• Автоматический итог приходит каждый день ровно в <b>23:00</b>.",
             parse_mode="HTML"
         )
         return
@@ -246,7 +335,7 @@ def handle_mode_switch(message):
         elif selected == "парфюмер":
             bot.reply_to(
                 message,
-                "🌸 Включен режим: <b>ПАРФЮМЕР</b>!\nБот готов детально и развернуто разбирать любые пирамиды и ароматы.",
+                "🌸 Включен режим: <b>ПАРФЮМЕР</b>!\nБот готов детально разбирать пирамиды и ольфакторные нюансы.",
                 parse_mode="HTML"
             )
         else:
@@ -266,6 +355,17 @@ def handle_mode_switch(message):
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     caption = message.caption or ""
+
+    sender_username = message.from_user.username
+    sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
+
+    if message.chat.id not in daily_chat_logs:
+        daily_chat_logs[message.chat.id] = []
+    daily_chat_logs[message.chat.id].append({
+        "user": sender_info,
+        "text": f"[Фото]: {caption}" if caption else "[Фото]"
+    })
+
     if not check_group_trigger(message, caption):
         return
 
@@ -292,11 +392,7 @@ def handle_photo(message):
             current_role = "эдвард"
 
     system_instruction = CHARACTERS.get(current_role, "")
-    # Для режимов "умный" и "парфюмер" ограничение краткости снимается
     brevity = "" if current_role in ["умный", "парфюмер"] else f"{BREVITY_RULE}\n\n"
-
-    sender_username = message.from_user.username
-    sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
 
     role_block = f"ИНСТРУКЦИЯ ПО РОЛИ:\n{system_instruction}\n\n" if system_instruction else ""
     user_context = f"{brevity}{role_block}[Автор запроса: {sender_info}]\nВопрос к фото: {prompt}"
@@ -329,6 +425,19 @@ def handle_photo(message):
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     user_text = message.text or ""
+    sender_username = message.from_user.username
+    sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
+
+    if not user_text.startswith("/"):
+        if message.chat.id not in daily_chat_logs:
+            daily_chat_logs[message.chat.id] = []
+        daily_chat_logs[message.chat.id].append({
+            "user": sender_info,
+            "text": user_text
+        })
+        if len(daily_chat_logs[message.chat.id]) > 400:
+            daily_chat_logs[message.chat.id].pop(0)
+
     if not check_group_trigger(message, user_text):
         return
 
@@ -356,11 +465,7 @@ def handle_message(message):
             current_role = "эдвард"
 
     system_instruction = CHARACTERS.get(current_role, "")
-    # Для режимов "умный" и "парфюмер" ограничение краткости снимается
     brevity = "" if current_role in ["умный", "парфюмер"] else f"{BREVITY_RULE}\n\n"
-
-    sender_username = message.from_user.username
-    sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
 
     role_block = f"ИНСТРУКЦИЯ ПО РОЛИ:\n{system_instruction}\n\n" if system_instruction else ""
     user_context = f"{brevity}{role_block}[Пишет пользователь: {sender_info}]\nСообщение: {prompt}"
@@ -402,8 +507,11 @@ def run_telebot():
             time.sleep(3)
 
 if __name__ == "__main__":
-    t = threading.Thread(target=run_telebot, daemon=True)
-    t.start()
+    t_bot = threading.Thread(target=run_telebot, daemon=True)
+    t_bot.start()
+
+    t_sched = threading.Thread(target=scheduler_thread, daemon=True)
+    t_sched.start()
 
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
