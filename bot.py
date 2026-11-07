@@ -21,7 +21,6 @@ if not GEMINI_API_KEY:
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Инициализация без принудительного v1beta для стабильной работы Free Tier
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 app = Flask(__name__)
@@ -125,9 +124,9 @@ BREVITY_RULE = (
 
 def get_candidate_models():
     return [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-2.5-pro"
+        "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.8-flash"
     ]
 
 def generate_ai_response(contents_payload) -> str:
