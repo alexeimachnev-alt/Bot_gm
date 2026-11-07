@@ -260,15 +260,31 @@ def fetch_sofascore_data(sport: str, query: str = "", league_filter: str = "") -
 
     is_live = "live" in query.lower() or "лайв" in query.lower()
 
+    # Цепочка эндпоинтов Sofascore API (Api Dojo)
+    endpoints_to_try = []
     if is_live:
-        endpoints_to_try = [
+        endpoints_to_try.append(
+            ("https://sofascore.p.rapidapi.com/events/schedule/live", {"sport": sport_name})
+        )
+        endpoints_to_try.append(
             ("https://sofascore.p.rapidapi.com/categories/list-live", {"sport": sport_name})
-        ]
+        )
     else:
-        endpoints_to_try = [
-            ("https://sofascore.p.rapidapi.com/categories/list-live", {"sport": sport_name}),
-            ("https://sofascore.p.rapidapi.com/categories/list", {"sport": sport_name})
-        ]
+        endpoints_to_try.append(
+            ("https://sofascore.p.rapidapi.com/events/schedule/date", {"date": target_date, "sport": sport_name})
+        )
+        endpoints_to_try.append(
+            ("https://sofascore.p.rapidapi.com/tournaments/events", {"date": target_date, "sport": sport_name})
+        )
+        # Альтернативный формат даты DD/MM/YYYY
+        try:
+            parts = target_date.split("-")
+            formatted_date_slash = f"{parts[2]}/{parts[1]}/{parts[0]}"
+            endpoints_to_try.append(
+                ("https://sofascore.p.rapidapi.com/events/schedule/date", {"date": formatted_date_slash, "sport": sport_name})
+            )
+        except Exception:
+            pass
 
     data = None
     last_err_text = ""
@@ -288,9 +304,15 @@ def fetch_sofascore_data(sport: str, query: str = "", league_filter: str = "") -
     if not data:
         return f"[!] Ошибка Sofascore: {last_err_text or 'Нет ответа от сервиса'}"
 
+    # Парсим структуру ответа Sofascore
     raw_events = []
     if isinstance(data, dict):
-        if "categories" in data:
+        if "events" in data and isinstance(data["events"], list):
+            raw_events = data["events"]
+        elif "tournaments" in data and isinstance(data["tournaments"], list):
+            for t in data["tournaments"]:
+                raw_events.extend(t.get("events", []))
+        elif "categories" in data and isinstance(data["categories"], list):
             for cat in data.get("categories", []):
                 cat_name = cat.get("name", "")
                 for tourn in cat.get("tournaments", []):
@@ -299,13 +321,11 @@ def fetch_sofascore_data(sport: str, query: str = "", league_filter: str = "") -
                         ev["_cat"] = cat_name
                         ev["_tourn"] = t_name
                         raw_events.append(ev)
-        elif "events" in data:
-            raw_events = data["events"]
     elif isinstance(data, list):
         raw_events = data
 
     if not raw_events:
-        return f"Матчей по запросу <b>{sport_title}</b> на {date_label} ({target_date}) не найдено в базе live-трансляций."
+        return f"Матчей по запросу <b>{sport_title}</b> на {date_label} ({target_date}) не найдено в базе."
 
     filter_word = (league_filter or "").lower()
 
