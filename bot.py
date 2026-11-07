@@ -42,7 +42,7 @@ awaiting_custom_date = {}
 MOCK_YESTERDAY_LOGS = [
     {"user": "@Bondar_17", "text": "Я минус дядь, я думал с ночевкой еду. Так не вариант вообще мотаться на таху рубль, там еще 2, и после футбола домой пиздовать через всю страну"},
     {"user": "Никита Кардаш", "text": "Бля у нас просто даже на таху нету, мы бы стартанули. У меня зп завтра только. Так бы мы к тебе стартанули с Валерой"},
-    {"user": "@Bondar_17", "text": "Я понял тебя. Меня надо звать когда есть варик у бона остаться, мне уже не вариант гонять без ночёвок"},
+    {"user": "@Bondar_17", "text": "Я понял тебя. Меня надо звать когда есть варик у бона остаться, мне уже не вариант гонять без ночевок"},
     {"user": "Никита Кардаш", "text": "Хахаах, нормас. Че ты подлетай к ткибе я тут. А че у тебя мстители безрукавка? Это команда новая моя в которой я вышел на 2 минуты и сломал руку"},
     {"user": "@Bondar_17", "text": "Ну зеленая ты Халк"},
     {"user": "Никита Кардаш", "text": "Щас на Вайлдберриз халява пиздец. Они 3500. Ну удобные"},
@@ -340,7 +340,7 @@ def fetch_sofascore_data(sport: str, query: str = "", league_filter: str = "") -
     translate_prompt = (
         f"Перед тобой перечень спортивных матчей ({sport_title}):\n"
         f'"""\n{raw_text}\n"""\n\n'
-        "Переведи названия клубов, стран и лиг НА РУССКИЙ ЯЗЫК и оформи аккуратный читаемый отчет.\n"
+        "Переведи названия клубов, стран и лиг НА РУССКИЙ ЯЗЫК и оформи аккуратный красивый отчет с эмодзи.\n"
         "Правила:\n"
         "1. Сгруппируй по турнирам (РПЛ, АПЛ, Ла Лига, КХЛ, НХЛ и т.д.).\n"
         "2. Формат строки: 'Команда1 Счет : Счет Команда2 (статус / минута)'.\n"
@@ -350,23 +350,24 @@ def fetch_sofascore_data(sport: str, query: str = "", league_filter: str = "") -
 
     translated = generate_ai_response(translate_prompt)
     label_show = league_filter.upper() if league_filter else f"{date_label.upper()} ({target_date})"
-    return f"<b>{sport_title} - {label_show}:</b>\n\n{translated}"
+    icon = "\u26BD" if sport == "football" else "\U0001F3D2"
+    return f"<b>{icon} {sport_title} - {label_show}:</b>\n\n{translated}"
 
-# --- КЛАВИАТУРЫ ---
+# --- КЛАВИАТУРЫ С БЕЗОПАСНЫМИ UNICODE ЭМОДЗИ И ФЛАГАМИ ---
 
 def get_football_main_keyboard():
     keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
-    b_live = tele_types.InlineKeyboardButton("⚡️ Лайв сейчас", callback_data="fb_live")
-    b_today = tele_types.InlineKeyboardButton("📅 Сегодня", callback_data="fb_today")
-    b_rpl = tele_types.InlineKeyboardButton("🇷🇺 РПЛ (Россия)", callback_data="fb_lg_rpl")
-    b_apl = tele_types.InlineKeyboardButton("🏴󠁧󠁢󠁥󠁮󠁧󠁿 АПЛ (Англия)", callback_data="fb_lg_apl")
-    b_laliga = tele_types.InlineKeyboardButton("🇪🇸 Ла Лига (Испания)", callback_data="fb_lg_laliga")
-    b_seriea = tele_types.InlineKeyboardButton("🇮🇹 Серия А (Италия)", callback_data="fb_lg_seriea")
-    b_buli = tele_types.InlineKeyboardButton("🇩🇪 Бундеслига (Германия)", callback_data="fb_lg_buli")
-    b_ucl = tele_types.InlineKeyboardButton("🇪🇺 Лига Чемпионов", callback_data="fb_lg_ucl")
-    b_yesterday = tele_types.InlineKeyboardButton("⏮ Вчера", callback_data="fb_yesterday")
-    b_tomorrow = tele_types.InlineKeyboardButton("⏭ Завтра", callback_data="fb_tomorrow")
-    b_custom = tele_types.InlineKeyboardButton("🗓 Выбрать дату вручную", callback_data="fb_custom")
+    b_live = tele_types.InlineKeyboardButton("\u26A1 Лайв сейчас", callback_data="fb_live")
+    b_today = tele_types.InlineKeyboardButton("\U0001F4C5 Сегодня", callback_data="fb_today")
+    b_rpl = tele_types.InlineKeyboardButton("\U0001F1F7\U0001F1FA РПЛ (Россия)", callback_data="fb_lg_rpl")
+    b_apl = tele_types.InlineKeyboardButton("\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F АПЛ (Англия)", callback_data="fb_lg_apl")
+    b_laliga = tele_types.InlineKeyboardButton("\U0001F1EA\U0001F1F8 Ла Лига (Испания)", callback_data="fb_lg_laliga")
+    b_seriea = tele_types.InlineKeyboardButton("\U0001F1EE\U0001F1F9 Серия А (Италия)", callback_data="fb_lg_seriea")
+    b_buli = tele_types.InlineKeyboardButton("\U0001F1E9\U0001F1EA Бундеслига (Германия)", callback_data="fb_lg_buli")
+    b_ucl = tele_types.InlineKeyboardButton("\U0001F3C6 Лига Чемпионов", callback_data="fb_lg_ucl")
+    b_yesterday = tele_types.InlineKeyboardButton("\u23EA Вчера", callback_data="fb_yesterday")
+    b_tomorrow = tele_types.InlineKeyboardButton("\u23E9 Завтра", callback_data="fb_tomorrow")
+    b_custom = tele_types.InlineKeyboardButton("\U0001F5D3 Выбрать дату вручную", callback_data="fb_custom")
     keyboard.add(b_live, b_today)
     keyboard.add(b_rpl, b_apl)
     keyboard.add(b_laliga, b_seriea)
@@ -377,14 +378,14 @@ def get_football_main_keyboard():
 
 def get_hockey_main_keyboard():
     keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
-    b_live = tele_types.InlineKeyboardButton("⚡️ Лайв сейчас", callback_data="hk_live")
-    b_today = tele_types.InlineKeyboardButton("📅 Сегодня", callback_data="hk_today")
-    b_khl = tele_types.InlineKeyboardButton("🇷🇺 КХЛ", callback_data="hk_lg_khl")
-    b_nhl = tele_types.InlineKeyboardButton("🇺🇸 / 🇨🇦 НХЛ", callback_data="hk_lg_nhl")
-    b_vhl = tele_types.InlineKeyboardButton("🇷🇺 ВХЛ", callback_data="hk_lg_vhl")
-    b_yesterday = tele_types.InlineKeyboardButton("⏮ Вчера", callback_data="hk_yesterday")
-    b_tomorrow = tele_types.InlineKeyboardButton("⏭ Завтра", callback_data="hk_tomorrow")
-    b_custom = tele_types.InlineKeyboardButton("🗓 Выбрать дату вручную", callback_data="hk_custom")
+    b_live = tele_types.InlineKeyboardButton("\u26A1 Лайв сейчас", callback_data="hk_live")
+    b_today = tele_types.InlineKeyboardButton("\U0001F4C5 Сегодня", callback_data="hk_today")
+    b_khl = tele_types.InlineKeyboardButton("\U0001F1F7\U0001F1FA КХЛ", callback_data="hk_lg_khl")
+    b_nhl = tele_types.InlineKeyboardButton("\U0001F1FA\U0001F1F8 / \U0001F1E8\U0001F1E6 НХЛ", callback_data="hk_lg_nhl")
+    b_vhl = tele_types.InlineKeyboardButton("\U0001F1F7\U0001F1FA ВХЛ", callback_data="hk_lg_vhl")
+    b_yesterday = tele_types.InlineKeyboardButton("\u23EA Вчера", callback_data="hk_yesterday")
+    b_tomorrow = tele_types.InlineKeyboardButton("\u23E9 Завтра", callback_data="hk_tomorrow")
+    b_custom = tele_types.InlineKeyboardButton("\U0001F5D3 Выбрать дату вручную", callback_data="hk_custom")
     keyboard.add(b_live, b_today)
     keyboard.add(b_khl, b_nhl)
     keyboard.add(b_vhl)
@@ -394,17 +395,17 @@ def get_hockey_main_keyboard():
 
 def get_mode_keyboard():
     keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
-    b_def = tele_types.InlineKeyboardButton("Дефолт", callback_data="setmode_дефолт")
-    b_smart = tele_types.InlineKeyboardButton("Умный", callback_data="setmode_умный")
-    b_diana = tele_types.InlineKeyboardButton("Диана", callback_data="setmode_диана")
-    b_kardash = tele_types.InlineKeyboardButton("Кардаш", callback_data="setmode_кардаш")
-    b_perfumer = tele_types.InlineKeyboardButton("Парфюмер", callback_data="setmode_парфюмер")
-    b_boss = tele_types.InlineKeyboardButton("Тони (Босс)", callback_data="setmode_босс")
-    b_prorab = tele_types.InlineKeyboardButton("Прораб", callback_data="setmode_прораб")
-    b_bratka = tele_types.InlineKeyboardButton("Братка", callback_data="setmode_братка")
-    b_dushnila = tele_types.InlineKeyboardButton("Душнила", callback_data="setmode_душнила")
-    b_sweet = tele_types.InlineKeyboardButton("Милая", callback_data="setmode_милая")
-    b_edward = tele_types.InlineKeyboardButton("Эдвард", callback_data="setmode_эдвард")
+    b_def = tele_types.InlineKeyboardButton("\U0001F504 Дефолт", callback_data="setmode_дефолт")
+    b_smart = tele_types.InlineKeyboardButton("\U0001F9E0 Умный", callback_data="setmode_умный")
+    b_diana = tele_types.InlineKeyboardButton("\U0001F484 Диана", callback_data="setmode_диана")
+    b_kardash = tele_types.InlineKeyboardButton("\U0001F953 Кардаш", callback_data="setmode_кардаш")
+    b_perfumer = tele_types.InlineKeyboardButton("\U0001F9EA Парфюмер", callback_data="setmode_парфюмер")
+    b_boss = tele_types.InlineKeyboardButton("\U0001F91F Тони (Босс)", callback_data="setmode_босс")
+    b_prorab = tele_types.InlineKeyboardButton("\U0001F6E0 Прораб", callback_data="setmode_прораб")
+    b_bratka = tele_types.InlineKeyboardButton("\U0001F44A Братка", callback_data="setmode_братка")
+    b_dushnila = tele_types.InlineKeyboardButton("\U0001F913 Душнила", callback_data="setmode_душнила")
+    b_sweet = tele_types.InlineKeyboardButton("\U0001F338 Милая", callback_data="setmode_милая")
+    b_edward = tele_types.InlineKeyboardButton("\U0001F9DB Эдвард", callback_data="setmode_эдвард")
     keyboard.add(b_def, b_smart)
     keyboard.add(b_diana, b_kardash)
     keyboard.add(b_perfumer, b_boss)
@@ -428,7 +429,7 @@ def handle_football_cmd(message):
     if len(parts) == 1:
         bot.reply_to(
             message,
-            "⚽ <b>Футбольный центр:</b>\nВыберите интересующую лигу, лайв или день:",
+            "\u26BD <b>Футбольный центр:</b>\nВыберите интересующую лигу, лайв или день:",
             reply_markup=get_football_main_keyboard(),
             parse_mode="HTML"
         )
@@ -451,7 +452,7 @@ def handle_hockey_cmd(message):
     if len(parts) == 1:
         bot.reply_to(
             message,
-            "🏒 <b>Хоккейный центр:</b>\nВыберите лигу (КХЛ, НХЛ, ВХЛ), лайв или день:",
+            "\U0001F3D2 <b>Хоккейный центр:</b>\nВыберите лигу (КХЛ, НХЛ, ВХЛ), лайв или день:",
             reply_markup=get_hockey_main_keyboard(),
             parse_mode="HTML"
         )
@@ -471,7 +472,7 @@ def handle_sport_callbacks(call):
         bot.answer_callback_query(call.id)
         bot.send_message(
             call.message.chat.id,
-            "<b>Введите дату для поиска матчей:</b>\n(например: <code>15.10.2024</code> или <code>2024-11-05</code>):",
+            "<b>\U0001F5D3 Введите дату для поиска матчей:</b>\n(например: <code>15.10.2024</code> или <code>2024-11-05</code>):",
             parse_mode="HTML"
         )
         return
@@ -545,7 +546,7 @@ def scheduler_thread():
                     if logs and len(logs) >= 3:
                         try:
                             summary_text = build_summary_from_messages(logs)
-                            header = "<b>ПЕРСОНАЛЬНЫЙ ИТОГ ДНЯ (23:00):</b>\n\n"
+                            header = "<b>\U0001F31F ПЕРСОНАЛЬНЫЙ ИТОГ ДНЯ (23:00):</b>\n\n"
                             bot.send_message(c_id, header + summary_text, parse_mode="HTML")
                         except Exception as e:
                             print(f"Ошибка отправки итогов в чат {c_id}: {e}")
@@ -562,7 +563,7 @@ def handle_test_summary(message):
     bot.send_chat_action(message.chat.id, "typing")
     try:
         summary_text = build_summary_from_messages(MOCK_YESTERDAY_LOGS)
-        bot.reply_to(message, f"<b>ТЕСТОВЫЙ РАЗБОР ПО УЧАСТНИКАМ:</b>\n\n{summary_text}", parse_mode="HTML")
+        bot.reply_to(message, f"<b>\U0001F3AD ТЕСТОВЫЙ РАЗБОР ПО УЧАСТНИКАМ:</b>\n\n{summary_text}", parse_mode="HTML")
     except Exception as e:
         bot.reply_to(message, f"Ошибка: {e}")
 
@@ -575,7 +576,7 @@ def handle_live_summary(message):
         return
     try:
         summary_text = build_summary_from_messages(logs)
-        bot.reply_to(message, f"<b>ИТОГИ С РАЗБОРОМ ПО УЧАСТНИКАМ:</b>\n\n{summary_text}", parse_mode="HTML")
+        bot.reply_to(message, f"<b>\U0001F4CB ИТОГИ С РАЗБОРОМ ПО УЧАСТНИКАМ:</b>\n\n{summary_text}", parse_mode="HTML")
     except Exception as e:
         bot.reply_to(message, f"Ошибка: {e}")
 
@@ -612,7 +613,7 @@ def handle_mode_callback(call):
     new_mode = call.data.replace("setmode_", "").strip().lower()
     chat_modes[call.message.chat.id] = new_mode
     bot.answer_callback_query(call.id, text=f"Режим переключен на: {new_mode.upper()}")
-    bot.send_message(call.message.chat.id, f"🎭 Режим успешно включен: <b>{new_mode.upper()}</b>!", parse_mode="HTML")
+    bot.send_message(call.message.chat.id, f"\U0001F3AD Режим успешно включен: <b>{new_mode.upper()}</b>!", parse_mode="HTML")
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
