@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip().strip("'\"")
 GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or "").strip().strip("'\"")
 FOOTBALL_API_KEY = (os.getenv("FOOTBALL_API_KEY") or "").strip().strip("'\"")
 
@@ -31,7 +31,7 @@ def health_check():
     return "Bot is alive!", 200
 
 chat_modes = {}
-daily_chat_logs = {}
+daily_chat_logs = defaultdict(list)
 
 MOCK_YESTERDAY_LOGS = [
     {"user": "@Bondar_17", "text": "Я минус дядь, я думал с ночевкой еду. Так не вариант вообще мотаться на таху рубль, там еще 2, и после футбола домой пиздовать через всю страну"},
@@ -92,7 +92,7 @@ CHARACTERS = {
     ),
     "милая": (
         "Твоя роль: невероятно милая, добрая и заботливая девушка. "
-        "Общаешься ласково, тепло, со смайликами и поднимаешь настроение."
+        "Общаешься ласково, тепло, со смайликами (✨, 🌸, 🥺, 💖) и поднимаешь настроение."
     ),
     "диана": (
         "Твое имя: Диана. Ты ушла от бывшего Виктора к его лучшему другу Жиробасу (Кардашу) и ни секунды не жалеешь. "
@@ -282,3 +282,346 @@ def fetch_football_data(query: str = "") -> str:
         year = int(target_date.split("-")[0])
         month = int(target_date.split("-")[1])
         params["season"] = year if month >= 7 else (year - 1)
+
+    title_parts = []
+    if matched_league_name:
+        title_parts.append(matched_league_name)
+    title_parts.append(f"на {date_label}")
+    title_suffix = f"({', '.join(title_parts)})"
+
+    try:
+        res = requests.get(url, headers=headers, params=params, timeout=12)
+        data = res.json()
+        fixtures = data.get("response", [])
+
+        if not fixtures:
+            if date_label == "сегодня" and not league_id:
+                res_live = requests.get(url, headers=headers, params={"live": "all"}, timeout=12)
+                fixtures = res_live.json().get("response", [])
+
+        if not fixtures:
+            return f"⚽ По запросу {title_suffix} матчей не найдено."
+
+        raw_items = []
+        for f in fixtures[:20]:
+            league_obj = f.get("league") or {}
+            l_name = league_obj.get("name", "Unknown")
+            country = league_obj.get("country", "")
+
+            teams_obj = f.get("teams") or {}
+            home = teams_obj.get("home", {}).get("name", "Команда 1")
+            away = teams_obj.get("away", {}).get("name", "Команда 2")
+
+            fix_obj = f.get("fixture") or {}
+            status_obj = fix_obj.get("status") or {}
+            status = status_obj.get("short", "")
+            elapsed = status_obj.get("elapsed")
+
+            goals = f.get("goals") or {}
+            g_home = goals.get("home") if goals.get("home") is not None else "-"
+            g_away = goals.get("away") if goals.get("away") is not None else "-"
+            time_mark = f"{elapsed}'" if elapsed else status
+
+            raw_items.append(f"[{country} - {l_name}] {home} {g_home}:{g_away} {away} (Status: {time_mark})")
+
+        raw_text = "\n".join(raw_items)
+
+        translate_prompt = (
+            "Перед тобой перечень футбольных матчей:\n"
+            f'"""\n{raw_text}\n"""\n\n'
+            "Переведи названия клубов, стран и турниров НА РУССКИЙ ЯЗЫК и оформи красивый отчет.\n"
+            "Правила:\n"
+            "1. Сгруппируй по турнирам (🏆 РПЛ, 🏴󠁧󠁢󠁥󠁮󠁧󠁿 АПЛ, 🇪🇸 Ла Лига и т.д.).\n"
+            "2. Формат строки: 'Команда1 Счет : Счет Команда2 (минута / статус)'.\n"
+            "3. Статусы: FT -> 'Завершен', HT -> 'Перерыв', NS -> 'Не начался', live-минуты -> просто минуты (напр. '34 мин').\n"
+            "Не пиши лишних приветствий, сразу готовый список."
+        )
+
+        translated = generate_ai_response(translate_prompt)
+        return f"⚽ <b>ФУТБОЛ {title_suffix.upper()}:</b>\n\n{translated}"
+
+    except Exception as e:
+        return f"⚠️ Ошибка при запросе: {e}"
+
+@bot.message_handler(commands=['football', 'футбол', 'матчи', 'счет'])
+def handle_football_cmd(message):
+    bot.send_chat_action(message.chat.id, "typing")
+    text = message.text or ""
+    parts = text.split(maxsplit=1)
+    query = parts[1].strip() if len(parts) > 1 else ""
+
+    result = fetch_football_data(query)
+    bot.reply_to(message, result, parse_mode="HTML")
+
+def build_summary_from_messages(logs) -> str:
+    user_messages = defaultdict(list)
+    for entry in logs:
+        user_messages[entry['user']].append(entry['text'])
+
+    users_digest = ""
+    for u_name, msgs in user_messages.items():
+        sample = " | ".join(msgs[-12:])
+        users_digest += f"Участник [{u_name}] (сообщений: {len(msgs)}):\nЦитаты: \"{sample}\"\n\n"
+
+    summary_prompt = (
+        "Ты — остроумный, ироничный обозреватель и стендап-комик в Telegram-чате.\n"
+        "Перед тобой сообщения участников за весь сегодняшний день, сгруппированные по каждому человеку:\n\n"
+        f"{users_digest}\n"
+        "Твоя задача — составить сочный, смешной и персонализированный 'ИТОГ ДНЯ В ЧАТЕ'.\n\n"
+        "СТРОГАЯ СТРУКТУРА ОТЧЕТА:\n"
+        "1. 📌 ПЕРСОНАЛЬНЫЙ РАЗБОР (пройдись ПО КАЖДОМУ пользователю отдельно):\n"
+        "   - Назови участника через @ или имя.\n"
+        "   - Выдай ему смешную номинацию (например: 'Экономист на такси', 'Ветеран Wildberries за 3500', 'Мисс токсичность').\n"
+        "   - С юмором прокомментируй его поведение: на что жаловался, чем хвастался, где затупил или о чем спорил, опираясь на его реальные слова.\n\n"
+        "2. 🔥 ГЛАВНЫЙ СЮЖЕТ И СПЛЕТНИ ДНЯ:\n"
+        "   - Опиши 1-2 главных конфликта или темы, вокруг которых бурлил чат.\n\n"
+        "3. 🌙 МОРАЛЬ НА НОЧЬ:\n"
+        "   - Финальная смешная фраза перед сном.\n\n"
+        "Пиши дерзко, весело, без канцелярита!"
+    )
+    return generate_ai_response(summary_prompt)
+
+def scheduler_thread():
+    moscow_tz = timezone(timedelta(hours=3))
+    while True:
+        try:
+            now = datetime.now(moscow_tz)
+            if now.hour == 23 and now.minute == 0:
+                chats_to_process = list(daily_chat_logs.keys())
+                for c_id in chats_to_process:
+                    logs = daily_chat_logs.get(c_id, [])
+                    if logs and len(logs) >= 3:
+                        try:
+                            summary_text = build_summary_from_messages(logs)
+                            header = "🌙 <b>ПЕРСОНАЛЬНЫЙ ИТОГ ДНЯ (23:00):</b>\n\n"
+                            bot.send_message(c_id, header + summary_text, parse_mode="HTML")
+                        except Exception as e:
+                            print(f"Ошибка отправки итогов в чат {c_id}: {e}")
+                    daily_chat_logs[c_id] = []
+                time.sleep(70)
+            else:
+                time.sleep(25)
+        except Exception as e:
+            print(f"Ошибка в цикле планировщика: {e}")
+            time.sleep(10)
+
+@bot.message_handler(commands=['summary_test', 'тест_итоги'])
+def handle_test_summary(message):
+    bot.send_chat_action(message.chat.id, "typing")
+    try:
+        summary_text = build_summary_from_messages(MOCK_YESTERDAY_LOGS)
+        bot.reply_to(message, f"🧪 <b>ТЕСТОВЫЙ РАЗБОР ПО УЧАСТНИКАМ:</b>\n\n{summary_text}", parse_mode="HTML")
+    except Exception as e:
+        bot.reply_to(message, f"Ошибка: {e}")
+
+@bot.message_handler(commands=['summary', 'итоги'])
+def handle_live_summary(message):
+    bot.send_chat_action(message.chat.id, "typing")
+    logs = daily_chat_logs.get(message.chat.id, [])
+    if not logs or len(logs) < 3:
+        bot.reply_to(message, "Сегодня в чате пока маловато сообщений. Напишите пару фраз или проверьте через <code>/summary_test</code>!", parse_mode="HTML")
+        return
+    try:
+        summary_text = build_summary_from_messages(logs)
+        bot.reply_to(message, f"📊 <b>ИТОГИ С РАЗБОРОМ ПО УЧАСТНИКАМ:</b>\n\n{summary_text}", parse_mode="HTML")
+    except Exception as e:
+        bot.reply_to(message, f"Ошибка: {e}")
+
+@bot.message_handler(commands=['mode', 'персонаж'])
+def handle_mode_switch(message):
+    text = message.text or ""
+    try:
+        bot_username = bot.get_me().username
+    except Exception:
+        bot_username = "Legendariki_chat_bot"
+
+    clean_text = text.replace(f"@{bot_username}", "").strip()
+    args = clean_text.split(maxsplit=1)
+
+    if len(args) < 2:
+        current = chat_modes.get(message.chat.id, "дефолт")
+        modes_list = "\n".join([f"• <code>/mode {k}</code>" for k in CHARACTERS.keys()])
+        bot.reply_to(
+            message,
+            f"Текущий режим чата: <b>{current.upper()}</b>\n\n"
+            f"Доступные роли:\n{modes_list}\n\n"
+            f"⚽ Футбольные команды:\n"
+            f"• <code>/football</code> — лайв прямо сейчас\n"
+            f"• <code>/football рпл вчера</code> — прошедшие матчи\n"
+            f"• <code>/football апл завтра</code> — расписание на завтра\n"
+            f"• <code>/football испания 08.11.2026</code> — выбор конкретной даты",
+            parse_mode="HTML"
+        )
+        return
+
+    selected = args[1].strip().lower()
+    if selected in CHARACTERS:
+        chat_modes[message.chat.id] = selected
+        if selected == "дефолт":
+            bot.reply_to(message, "⚙️ Режим сброшен на: <b>ДЕФОЛТ</b>.\nВсе личности и триггеры отключены.", parse_mode="HTML")
+        elif selected == "умный":
+            bot.reply_to(message, "🧠 Включен режим: <b>УМНЫЙ</b>!\nБот отвечает максимально подробно.", parse_mode="HTML")
+        elif selected == "парфюмер":
+            bot.reply_to(message, "🌸 Включен режим: <b>ПАРФЮМЕР</b>!\nРазвернутый разбор ароматов и пирамид.", parse_mode="HTML")
+        else:
+            bot.reply_to(message, f"🎭 Режим успешно включен: <b>{selected.upper()}</b>!", parse_mode="HTML")
+    else:
+        bot.reply_to(message, f"Не знаю роли '{selected}'. Отправь <code>/mode</code> для списка.", parse_mode="HTML")
+
+@bot.message_handler(content_types=['photo'])
+def handle_photo(message):
+    caption = message.caption or ""
+    sender_username = message.from_user.username
+    sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
+
+    daily_chat_logs[message.chat.id].append({
+        "user": sender_info,
+        "text": f"[Фото]: {caption}" if caption else "[Фото]"
+    })
+
+    if not check_group_trigger(message, caption):
+        return
+
+    try:
+        bot_username = bot.get_me().username
+    except Exception:
+        bot_username = "Legendariki_chat_bot"
+
+    prompt = caption.replace(f"@{bot_username}", "").strip()
+    if not prompt:
+        prompt = "Опиши, что изображено на фото, проанализируй свойства и дай совет."
+
+    current_role = chat_modes.get(message.chat.id, "дефолт")
+
+    if current_role != "дефолт":
+        lower_prompt = prompt.lower()
+        if "диан" in lower_prompt:
+            current_role = "диана"
+        elif any(k in lower_prompt for k in ["кардаш", "жиробас", "никит"]):
+            current_role = "кардаш"
+        elif any(k in lower_prompt for k in ["парфюм", "духи", "аромат"]):
+            current_role = "парфюмер"
+        elif any(k in lower_prompt for k in ["эдвард", "сумерк", "каллен"]):
+            current_role = "эдвард"
+
+    system_instruction = CHARACTERS.get(current_role, "")
+    brevity = "" if current_role in ["умный", "парфюмер"] else f"{BREVITY_RULE}\n\n"
+
+    role_block = f"ИНСТРУКЦИЯ ПО РОЛИ:\n{system_instruction}\n\n" if system_instruction else ""
+    user_context = f"{brevity}{role_block}[Автор запроса: {sender_info}]\nВопрос к фото: {prompt}"
+
+    if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
+        prev_text = message.reply_to_message.text or ""
+        if len(prev_text) > 1200:
+            prev_text = prev_text[:1200] + "..."
+        final_prompt = f'Контекст твоего предыдущего ответа:\n"""{prev_text}"""\n\n{user_context}'
+    else:
+        final_prompt = user_context
+
+    bot.send_chat_action(message.chat.id, "typing")
+
+    try:
+        photo_info = bot.get_file(message.photo[-1].file_id)
+        downloaded_file = bot.download_file(photo_info.file_path)
+
+        image_part = types.Part.from_bytes(
+            data=downloaded_file,
+            mime_type="image/jpeg",
+        )
+
+        reply_text = generate_ai_response([image_part, final_prompt])
+        send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
+    except Exception as e:
+        send_long_message(message.chat.id, f"Ошибка при анализе фото: {e}", reply_to_id=message.message_id)
+
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    user_text = message.text or ""
+    sender_username = message.from_user.username
+    sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
+
+    if not user_text.startswith("/"):
+        daily_chat_logs[message.chat.id].append({
+            "user": sender_info,
+            "text": user_text
+        })
+        if len(daily_chat_logs[message.chat.id]) > 400:
+            daily_chat_logs[message.chat.id].pop(0)
+
+    if not check_group_trigger(message, user_text):
+        return
+
+    try:
+        bot_username = bot.get_me().username
+    except Exception:
+        bot_username = "Legendariki_chat_bot"
+
+    prompt = user_text.replace(f"@{bot_username}", "").strip()
+    if not prompt:
+        bot.reply_to(message, "Чем могу помочь?")
+        return
+
+    current_role = chat_modes.get(message.chat.id, "дефолт")
+
+    if current_role != "дефолт":
+        lower_prompt = prompt.lower()
+        if "диан" in lower_prompt:
+            current_role = "диана"
+        elif any(k in lower_prompt for k in ["кардаш", "жиробас", "никит"]):
+            current_role = "кардаш"
+        elif any(k in lower_prompt for k in ["парфюм", "духи", "аромат"]):
+            current_role = "парфюмер"
+        elif any(k in lower_prompt for k in ["эдвард", "сумерк", "каллен"]):
+            current_role = "эдвард"
+
+    system_instruction = CHARACTERS.get(current_role, "")
+    brevity = "" if current_role in ["умный", "парфюмер"] else f"{BREVITY_RULE}\n\n"
+
+    role_block = f"ИНСТРУКЦИЯ ПО РОЛИ:\n{system_instruction}\n\n" if system_instruction else ""
+    user_context = f"{brevity}{role_block}[Пишет пользователь: {sender_info}]\nСообщение: {prompt}"
+
+    if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
+        prev_bot_reply = message.reply_to_message.text or ""
+        if len(prev_bot_reply) > 1500:
+            prev_bot_reply = prev_bot_reply[:1500] + "..."
+
+        final_prompt = (
+            f'Контекст твоего предыдущего ответа:\n"""{prev_bot_reply}"""\n\n'
+            f"{user_context}"
+        )
+    else:
+        final_prompt = user_context
+
+    bot.send_chat_action(message.chat.id, "typing")
+
+    try:
+        reply_text = generate_ai_response(final_prompt)
+        send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
+    except Exception as e:
+        send_long_message(message.chat.id, f"Ошибка при ответе: {e}", reply_to_id=message.message_id)
+
+def run_telebot():
+    print("Инициализация Telegram polling...")
+    try:
+        bot.delete_webhook(drop_pending_updates=True)
+        time.sleep(2)
+    except Exception:
+        pass
+
+    print("Telegram polling запущен...")
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=1, timeout=20)
+        except Exception as e:
+            print(f"Сбой polling: {e}. Перезапуск через 3 сек...")
+            time.sleep(3)
+
+if __name__ == "__main__":
+    t_bot = threading.Thread(target=run_telebot, daemon=True)
+    t_bot.start()
+
+    t_sched = threading.Thread(target=scheduler_thread, daemon=True)
+    t_sched.start()
+
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
