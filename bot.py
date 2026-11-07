@@ -1,6 +1,7 @@
 import os
 import time
 import threading
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from flask import Flask
 import telebot
@@ -29,16 +30,16 @@ def health_check():
 chat_modes = {}
 daily_chat_logs = {}
 
-# Заготовленный тестовый лог "вчерашнего дня" для мгновенной проверки
+# Реалистичный вчерашний диалог для теста персонального разбора
 MOCK_YESTERDAY_LOGS = [
-    {"user": "@Bondar_17", "text": "Здорово всем, кто сегодня на тренировку подтягивается?"},
-    {"user": "Никита Кардаш", "text": "Нормас, я на смене в ФОКе до вечера. Турникеты держу, хаха"},
-    {"user": "@Bondar_17", "text": "Опять в каморке сидишь кроссворды гадаешь за двадцатку?"},
-    {"user": "Диана", "text": "Слышь Бондарь, закрой свой рот нищий! Он начальник безопасности объекта! Завидуй молча со своими копейками!"},
-    {"user": "Никита Кардаш", "text": "Хаха Витек че ты пыхтишь. Щас на Вайлдберриз халява пиздец кроссы урвал за 3500"},
-    {"user": "Участник", "text": "Ребят, хорош сраться, кто знает где нормальный парфюм взять в подарок?"},
-    {"user": "Диана", "text": "Мне мой вчера Tom Ford подогнал, а вы дальше нюхайте с рынка тестеры нищеброды"},
-    {"user": "Никита Кардаш", "text": "Бля у меня зп завтра только, так бы на таху скинулись и стартанули"}
+    {"user": "@Bondar_17", "text": "Я минус дядь, я думал с ночевкой еду. Так не вариант вообще мотаться на таху рубль, там еще 2, и после футбола домой пиздовать через всю страну"},
+    {"user": "Никита Кардаш", "text": "Бля у нас просто даже на таху нету, мы бы стартанули. У меня зп завтра только. Так бы мы к тебе стартанули с Валерой"},
+    {"user": "@Bondar_17", "text": "Я понял тебя. Меня надо звать когда есть варик у бона остаться, мне уже не вариант гонять без ночёвок"},
+    {"user": "Никита Кардаш", "text": "Хахаах, нормас. Че ты подлетай к ткибе я тут. А че у тебя мстители безрукавка? Это команда новая моя в которой я вышел на 2 минуты и сломал руку"},
+    {"user": "@Bondar_17", "text": "Ну зеленая ты Халк"},
+    {"user": "Никита Кардаш", "text": "Щас на Вайлдберриз халява пиздец. Они 3500. Ну удобные"},
+    {"user": "Диана", "text": "Бондарь, хватит ныть про свои копейки на такси, нищеброд! Мой Кардаш себе новые адики взял, а ты считаешь рубли на маршрутку. Мы с ним кайфуем, завидуй молча!"},
+    {"user": "Екатерина", "text": "Кто-нибудь разбирается в молекулярных духах? Хочу шлейфовый нишевый аромат на осень, посоветуйте пирамиду"}
 ]
 
 CHARACTERS = {
@@ -219,17 +220,31 @@ def check_group_trigger(message, text: str) -> bool:
     return is_private or is_mentioned or is_reply_to_bot or is_called_by_name
 
 def build_summary_from_messages(logs) -> str:
-    chat_transcript = "\n".join([f"{item['user']}: {item['text']}" for item in logs[-150:]])
+    """Группирует сообщения по каждому автору и генерирует персональный разбор + общий итог."""
+    user_messages = defaultdict(list)
+    for entry in logs:
+        user_messages[entry['user']].append(entry['text'])
+
+    users_digest = ""
+    for u_name, msgs in user_messages.items():
+        sample = " | ".join(msgs[-12:])
+        users_digest += f"Участник [{u_name}] (сообщений: {len(msgs)}):\nЦитаты и тезисы: \"{sample}\"\n\n"
 
     summary_prompt = (
-        "Перед тобой хроника сообщений из Telegram-чата:\n"
-        f"\"\"\"\n{chat_transcript}\n\"\"\"\n\n"
-        "Составь смешной, саркастичный и живой 'ИТОГ ДНЯ В ЧАТЕ' в стиле вечернего выпуска новостей или стендапа.\n"
-        "Требования:\n"
-        "1. Кратко и с юмором перескажи главные драмы, споры или суету за сегодня.\n"
-        "2. Раздай шуточные номинации участникам (например: 'Суетолог дня', 'Элита с Вайлдберриз', 'Мисс токсичность' и т.д.).\n"
-        "3. Финальная смешная мораль или напутствие на ночь.\n"
-        "Не пиши сухих отчетов, пиши угарно и остроумно."
+        "Ты — остроумный, ироничный обозреватель и стендап-комик в Telegram-чате.\n"
+        "Перед тобой сообщения участников за весь сегодняшний день, сгруппированные по каждому человеку:\n\n"
+        f"{users_digest}\n"
+        "Твоя задача — составить сочный, смешной и персонализированный 'ИТОГ ДНЯ В ЧАТЕ'.\n\n"
+        "СТРОГАЯ СТРУКТУРА ОТЧЕТА:\n"
+        "1. 📌 ПЕРСОНАЛЬНЫЙ РАЗБОР (пройдись ПО КАЖДОМУ пользователю отдельно):\n"
+        "   - Назови участника через @ или имя.\n"
+        "   - Выдай ему смешную номинацию (например: 'Экономист на такси', 'Ветеран Wildberries за 3500', 'Мисс токсичность').\n"
+        "   - С юмором прокомментируй его поведение: на что жаловался, чем хвастался, где затупил или о чем спорил, опираясь на его реальные слова.\n\n"
+        "2. 🔥 ГЛАВНЫЙ СЮЖЕТ И СПЛЕТНИ ДНЯ:\n"
+        "   - Опиши 1-2 главных конфликта или темы, вокруг которых бурлил чат (деньги, шмотки, спорт, отношения и т.д.).\n\n"
+        "3. 🌙 МОРАЛЬ НА НОЧЬ:\n"
+        "   - Одна угарная финальная фраза-пожелание перед сном.\n\n"
+        "Пиши живо, дерзко, без унылой банальщины и канцелярита!"
     )
     return generate_ai_response(summary_prompt)
 
@@ -241,7 +256,6 @@ def scheduler_thread():
     while True:
         try:
             now = datetime.now(moscow_tz)
-            # Срабатывание ровно в 23:00
             if now.hour == 23 and now.minute == 0:
                 print(f"[{now.strftime('%H:%M:%S')}] Публикация вечерних итогов дня...")
                 chats_to_process = list(daily_chat_logs.keys())
@@ -250,7 +264,7 @@ def scheduler_thread():
                     if logs and len(logs) >= 3:
                         try:
                             summary_text = build_summary_from_messages(logs)
-                            header = "🌙 <b>ВЕЧЕРНИЙ ИТОГ ДНЯ (23:00):</b>\n\n"
+                            header = "🌙 <b>ПЕРСОНАЛЬНЫЙ ИТОГ ДНЯ (23:00):</b>\n\n"
                             bot.send_message(c_id, header + summary_text, parse_mode="HTML")
                         except Exception as e:
                             print(f"Ошибка отправки итогов в чат {c_id}: {e}")
@@ -264,13 +278,13 @@ def scheduler_thread():
 
 @bot.message_handler(commands=['summary_test', 'тест_итоги'])
 def handle_test_summary(message):
-    """Мгновенная проверка генерации итогов на вчерашнем тестовом материале."""
+    """Мгновенная проверка генерации персонального разбора."""
     bot.send_chat_action(message.chat.id, "typing")
     try:
         summary_text = build_summary_from_messages(MOCK_YESTERDAY_LOGS)
         bot.reply_to(
             message,
-            f"🧪 <b>ТЕСТОВЫЙ ИТОГ ВЧЕРАШНЕГО ДНЯ:</b>\n\n{summary_text}",
+            f"🧪 <b>ТЕСТОВЫЙ РАЗБОР ПО КАЖДОМУ УЧАСТНИКУ:</b>\n\n{summary_text}",
             parse_mode="HTML"
         )
     except Exception as e:
@@ -278,16 +292,16 @@ def handle_test_summary(message):
 
 @bot.message_handler(commands=['summary', 'итоги'])
 def handle_live_summary(message):
-    """Итоги на основе реальных сообщений, записанных за сегодня."""
+    """Итоги на основе реальных сообщений за сегодня с разбором каждого участника."""
     bot.send_chat_action(message.chat.id, "typing")
     logs = daily_chat_logs.get(message.chat.id, [])
     if not logs or len(logs) < 3:
-        bot.reply_to(message, "Сегодня в чате пока слишком мало сообщений для полноценного дайджеста. Проверь через <code>/summary_test</code>!", parse_mode="HTML")
+        bot.reply_to(message, "Сегодня в чате пока маловато сообщений. Напишите пару фраз или проверьте через <code>/summary_test</code>!", parse_mode="HTML")
         return
 
     try:
         summary_text = build_summary_from_messages(logs)
-        bot.reply_to(message, f"📊 <b>ТЕКУЩИЙ ИТОГ ЧАТА:</b>\n\n{summary_text}", parse_mode="HTML")
+        bot.reply_to(message, f"📊 <b>ИТОГИ С РАЗБОРОМ ПО УЧАСТНИКАМ:</b>\n\n{summary_text}", parse_mode="HTML")
     except Exception as e:
         bot.reply_to(message, f"Ошибка: {e}")
 
@@ -310,7 +324,7 @@ def handle_mode_switch(message):
             f"Текущий режим чата: <b>{current.upper()}</b>\n\n"
             f"Доступные роли:\n{modes_list}\n\n"
             f"Команды дайджеста:\n"
-            f"• <code>/summary_test</code> — проверить вчерашний итог прямо сейчас\n"
+            f"• <code>/summary_test</code> — проверить персональный разбор прямо сейчас\n"
             f"• <code>/summary</code> — итоги из текущей переписки\n"
             f"• Автоматический итог приходит каждый день ровно в <b>23:00</b>.",
             parse_mode="HTML"
