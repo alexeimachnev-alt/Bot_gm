@@ -5,19 +5,14 @@ import threading
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from flask import Flask
-import requests
 import telebot
 from telebot import types as tele_types
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 
-# Импорт инженерного модуля калькулятора и прайс-листа
-from calc_module import register_calc_handlers
-
 TELEGRAM_BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip().strip("'\"")
 GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or "").strip().strip("'\"")
-FOOTBALL_API_KEY = (os.getenv("FOOTBALL_API_KEY") or "").strip().strip("'\"")
 
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN не задан в переменных окружения!")
@@ -25,9 +20,6 @@ if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY не задан в переменных окружения!")
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-
-# Регистрация модуля скважин и прайса
-register_calc_handlers(bot)
 
 ai_client = genai.Client(
     api_key=GEMINI_API_KEY,
@@ -43,7 +35,6 @@ def health_check():
 
 chat_modes = {}
 daily_chat_logs = defaultdict(list)
-awaiting_custom_date = {}
 
 MOCK_YESTERDAY_LOGS = [
     {"user": "@Bondar_17", "text": "Я минус дядь, я думал с ночевкой еду. Так не вариант вообще мотаться на таху рубль, там еще 2, и после футбола домой пиздовать через всю страну"},
@@ -136,8 +127,8 @@ BREVITY_RULE = (
 
 def get_candidate_models():
     return [
-        "gemini-2.5-flash",
         "gemini-2.0-flash",
+        "gemini-2.5-flash",
         "gemini-2.5-pro",
         "gemini-flash-latest"
     ]
@@ -147,23 +138,26 @@ def generate_ai_response(contents_payload) -> str:
     last_error = None
 
     for model_name in models:
-        try:
-            response = ai_client.models.generate_content(
-                model=model_name,
-                contents=contents_payload,
-            )
-            if response.text:
-                return response.text
-        except APIError as e:
-            last_error = e
-            if e.code in [503, 429, 404]:
-                time.sleep(0.5)
-                continue
-            break
-        except Exception as e:
-            last_error = e
-            time.sleep(0.5)
-            continue
+        for attempt in range(2):
+            try:
+                response = ai_client.models.generate_content(
+                    model=model_name,
+                    contents=contents_payload,
+                )
+                if response.text:
+                    return response.text
+            except APIError as e:
+                last_error = e
+                if e.code in [503, 429]:
+                    time.sleep(1.2)
+                    continue
+                elif e.code == 404:
+                    break
+                break
+            except Exception as e:
+                last_error = e
+                time.sleep(1)
+                break
 
     raise last_error or Exception("Серверы нейросети временно перегружены. Попробуйте снова через минуту.")
 
@@ -208,279 +202,6 @@ def check_group_trigger(message, text: str) -> bool:
     is_called_by_name = any(name in lower_text for name in all_names)
 
     return is_private or is_mentioned or is_reply_to_bot or is_called_by_name
-
-# --- СПОРТИВНЫЙ МОДУЛЬ (LIVESCORE RAPIDAPI) ---
-
-def parse_sport_date(query: str):
-    moscow_tz = timezone(timedelta(hours=3))
-    now = datetime.now(moscow_tz)
-
-    target_dt = now
-    date_label = "сегодня"
-    remaining_text = query.strip().lower()
-
-    if "вчера" in remaining_text:
-        target_dt = now - timedelta(days=1)
-        date_label = "вчера"
-    elif "завтра" in remaining_text:
-        target_dt = now + timedelta(days=1)
-        date_label = "завтра"
-    elif "сегодня" in remaining_text:
-        target_dt = now
-        date_label = "сегодня"
-    else:
-        iso_match = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", remaining_text)
-        if iso_match:
-            try:
-                target_dt = datetime(int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3)))
-                date_label = target_dt.strftime("%d.%m.%Y")
-            except Exception:
-                pass
-        else:
-            dot_match = re.search(r"\b(\d{1,2})[\.\/ -](\d{1,2})(?:[\.\/ -](\d{2,4}))?\b", remaining_text)
-            if dot_match:
-                day = int(dot_match.group(1))
-                month = int(dot_match.group(2))
-                raw_year = dot_match.group(3)
-                year = int(raw_year) if raw_year else now.year
-                if year < 100:
-                    year += 2000
-                try:
-                    target_dt = datetime(year, month, day)
-                    date_label = target_dt.strftime("%d.%m.%Y")
-                except Exception:
-                    pass
-
-    date_compact = target_dt.strftime("%Y%m%d")
-    date_display = target_dt.strftime("%d.%m.%Y")
-    return date_compact, date_display, date_label
-
-def fetch_sports_data(sport: str, query: str = "", league_filter: str = "") -> str:
-    if not FOOTBALL_API_KEY:
-        return "[!] Переменная FOOTBALL_API_KEY не настроена на Render."
-
-    clean_key = FOOTBALL_API_KEY.strip().strip("'\"")
-    date_compact, date_display, date_label = parse_sport_date(query)
-    sport_category = "soccer" if sport == "football" else "hockey"
-    sport_title = "ФУТБОЛ" if sport == "football" else "ХОККЕЙ"
-
-    headers = {
-        "x-rapidapi-key": clean_key,
-        "x-rapidapi-host": "livescore6.p.rapidapi.com"
-    }
-    url = "https://livescore6.p.rapidapi.com/matches/v2/list-by-date"
-    params = {
-        "Category": sport_category,
-        "Date": date_compact
-    }
-
-    try:
-        res = requests.get(url, headers=headers, params=params, timeout=14)
-        if res.status_code != 200:
-            return f"[!] Ошибка сервиса LiveScore: HTTP {res.status_code} ({res.text[:120]})"
-
-        data = res.json()
-        stages = data.get("Stages") or []
-
-        if not stages:
-            return f"Матчей по запросу <b>{sport_title}</b> на {date_label} ({date_display}) не найдено."
-
-        filter_word = (league_filter or "").lower()
-
-        raw_items = []
-        for stage in stages:
-            country = stage.get("Cnm", "")
-            league = stage.get("Snm", "")
-            full_league_name = f"{country} - {league}"
-
-            if filter_word and (filter_word not in country.lower() and filter_word not in league.lower()):
-                continue
-
-            for event in stage.get("Events", []):
-                t1 = event.get("T1", [{}])[0].get("Nm", "Команда 1")
-                t2 = event.get("T2", [{}])[0].get("Nm", "Команда 2")
-
-                score1 = event.get("Tr1", event.get("Tr1OR", "-"))
-                score2 = event.get("Tr2", event.get("Tr2OR", "-"))
-                match_status = event.get("Eps", event.get("Esd", ""))
-
-                raw_items.append(f"[{full_league_name}] {t1} {score1}:{score2} {t2} (Статус: {match_status})")
-                if len(raw_items) >= 28:
-                    break
-            if len(raw_items) >= 28:
-                break
-
-        if not raw_items:
-            return f"Матчей в лиге <b>{league_filter.upper()}</b> на {date_label} ({date_display}) не найдено."
-
-        raw_text = "\n".join(raw_items)
-
-        translate_prompt = (
-            f"Перед тобой перечень спортивных матчей ({sport_title}):\n"
-            f'"""\n{raw_text}\n"""\n\n'
-            "Переведи названия клубов, стран и турниров НА РУССКИЙ ЯЗЫК и сформируй аккуратный отчет.\n"
-            "Правила:\n"
-            "1. Сгруппируй по турнирам (РПЛ, АПЛ, Ла Лига, КХЛ, НХЛ и т.д.).\n"
-            "2. Формат строки: 'Команда1 Счет : Счет Команда2 (статус / время)'.\n"
-            "3. Статусы: FT / AET / AP -> 'Завершен', NS -> 'Не начался', минуты -> время игры.\n"
-            "Сразу выдавай готовый список без лишних вступительных фраз."
-        )
-
-        translated = generate_ai_response(translate_prompt)
-        icon = "\u26BD" if sport == "football" else "\U0001F3D2"
-        return f"<b>{icon} {sport_title} ({date_label.upper()}, {date_display}):</b>\n\n{translated}"
-
-    except Exception as e:
-        return f"[!] Ошибка запроса матчей: {e}"
-
-# --- КЛАВИАТУРЫ ---
-
-def get_football_main_keyboard():
-    keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
-    b_today = tele_types.InlineKeyboardButton("\U0001F4C5 Сегодня", callback_data="fb_dt_today")
-    b_yesterday = tele_types.InlineKeyboardButton("\u23EA Вчера", callback_data="fb_dt_yesterday")
-    b_tomorrow = tele_types.InlineKeyboardButton("\u23E9 Завтра", callback_data="fb_dt_tomorrow")
-    b_custom = tele_types.InlineKeyboardButton("\U0001F5D3 Выбрать дату", callback_data="fb_custom")
-
-    b_rpl = tele_types.InlineKeyboardButton("\U0001F1F7\U0001F1FA РПЛ (Россия)", callback_data="fb_lg_premier")
-    b_apl = tele_types.InlineKeyboardButton("\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F АПЛ (Англия)", callback_data="fb_lg_premier league")
-    b_laliga = tele_types.InlineKeyboardButton("\U0001F1EA\U0001F1F8 Ла Лига (Испания)", callback_data="fb_lg_laliga")
-    b_seriea = tele_types.InlineKeyboardButton("\U0001F1EE\U0001F1F9 Серия А (Италия)", callback_data="fb_lg_serie a")
-    b_buli = tele_types.InlineKeyboardButton("\U0001F1E9\U0001F1EA Бундеслига (Германия)", callback_data="fb_lg_bundesliga")
-    b_ucl = tele_types.InlineKeyboardButton("\U0001F3C6 Лига Чемпионов", callback_data="fb_lg_champions league")
-
-    keyboard.add(b_today, b_yesterday)
-    keyboard.add(b_tomorrow, b_custom)
-    keyboard.add(b_rpl, b_apl)
-    keyboard.add(b_laliga, b_seriea)
-    keyboard.add(b_buli, b_ucl)
-    return keyboard
-
-def get_hockey_main_keyboard():
-    keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
-    b_today = tele_types.InlineKeyboardButton("\U0001F4C5 Сегодня", callback_data="hk_dt_today")
-    b_yesterday = tele_types.InlineKeyboardButton("\u23EA Вчера", callback_data="hk_dt_yesterday")
-    b_tomorrow = tele_types.InlineKeyboardButton("\u23E9 Завтра", callback_data="hk_dt_tomorrow")
-    b_custom = tele_types.InlineKeyboardButton("\U0001F5D3 Выбрать дату", callback_data="hk_custom")
-
-    b_khl = tele_types.InlineKeyboardButton("\U0001F1F7\U0001F1FA КХЛ", callback_data="hk_lg_khl")
-    b_nhl = tele_types.InlineKeyboardButton("\U0001F1FA\U0001F1F8 / \U0001F1E8\U0001F1E6 НХЛ", callback_data="hk_lg_nhl")
-    b_vhl = tele_types.InlineKeyboardButton("\U0001F1F7\U0001F1FA ВХЛ", callback_data="hk_lg_vhl")
-
-    keyboard.add(b_today, b_yesterday)
-    keyboard.add(b_tomorrow, b_custom)
-    keyboard.add(b_khl, b_nhl)
-    keyboard.add(b_vhl)
-    return keyboard
-
-def get_mode_keyboard():
-    keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
-    b_def = tele_types.InlineKeyboardButton("\U0001F504 Дефолт", callback_data="setmode_дефолт")
-    b_smart = tele_types.InlineKeyboardButton("\U0001F9E0 Умный", callback_data="setmode_умный")
-    b_diana = tele_types.InlineKeyboardButton("\U0001F484 Диана", callback_data="setmode_диана")
-    b_kardash = tele_types.InlineKeyboardButton("\U0001F953 Кардаш", callback_data="setmode_кардаш")
-    b_perfumer = tele_types.InlineKeyboardButton("\U0001F9EA Парфюмер", callback_data="setmode_парфюмер")
-    b_boss = tele_types.InlineKeyboardButton("\U0001F91F Тони (Босс)", callback_data="setmode_босс")
-    b_prorab = tele_types.InlineKeyboardButton("\U0001F6E0 Прораб", callback_data="setmode_прораб")
-    b_bratka = tele_types.InlineKeyboardButton("\U0001F44A Братка", callback_data="setmode_братка")
-    b_dushnila = tele_types.InlineKeyboardButton("\U0001F913 Душнила", callback_data="setmode_душнила")
-    b_sweet = tele_types.InlineKeyboardButton("\U0001F338 Милая", callback_data="setmode_милая")
-    b_edward = tele_types.InlineKeyboardButton("\U0001F9DB Эдвард", callback_data="setmode_эдвард")
-    keyboard.add(b_def, b_smart)
-    keyboard.add(b_diana, b_kardash)
-    keyboard.add(b_perfumer, b_boss)
-    keyboard.add(b_prorab, b_bratka)
-    keyboard.add(b_dushnila, b_sweet)
-    keyboard.add(b_edward)
-    return keyboard
-
-# --- ОБРАБОТЧИКИ КОМАНД СПОРТА ---
-
-@bot.message_handler(commands=['football', 'футбол'])
-def handle_football_cmd(message):
-    try:
-        bot_username = bot.get_me().username
-    except Exception:
-        bot_username = "Legendariki_chat_bot"
-
-    clean_text = (message.text or "").replace(f"@{bot_username}", "").strip()
-    parts = clean_text.split(maxsplit=1)
-
-    if len(parts) == 1:
-        bot.reply_to(
-            message,
-            "\u26BD <b>Футбольный центр:</b>\nВыберите день или интересующую лигу:",
-            reply_markup=get_football_main_keyboard(),
-            parse_mode="HTML"
-        )
-        return
-
-    bot.send_chat_action(message.chat.id, "typing")
-    result = fetch_sports_data("football", parts[1])
-    bot.reply_to(message, result, parse_mode="HTML")
-
-@bot.message_handler(commands=['hockey', 'хоккей'])
-def handle_hockey_cmd(message):
-    try:
-        bot_username = bot.get_me().username
-    except Exception:
-        bot_username = "Legendariki_chat_bot"
-
-    clean_text = (message.text or "").replace(f"@{bot_username}", "").strip()
-    parts = clean_text.split(maxsplit=1)
-
-    if len(parts) == 1:
-        bot.reply_to(
-            message,
-            "\U0001F3D2 <b>Хоккейный центр:</b>\nВыберите день или лигу (КХЛ, НХЛ, ВХЛ):",
-            reply_markup=get_hockey_main_keyboard(),
-            parse_mode="HTML"
-        )
-        return
-
-    bot.send_chat_action(message.chat.id, "typing")
-    result = fetch_sports_data("ice-hockey", parts[1])
-    bot.reply_to(message, result, parse_mode="HTML")
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith(("fb_", "hk_")))
-def handle_sport_callbacks(call):
-    is_football = call.data.startswith("fb_")
-    sport_type = "football" if is_football else "ice-hockey"
-
-    if call.data in ["fb_custom", "hk_custom"]:
-        awaiting_custom_date[call.message.chat.id] = sport_type
-        bot.answer_callback_query(call.id)
-        bot.send_message(
-            call.message.chat.id,
-            "<b>\U0001F5D3 Введите дату для поиска матчей:</b>\n(например: <code>15.10.2024</code> или <code>2024-11-05</code>):",
-            parse_mode="HTML"
-        )
-        return
-
-    bot.answer_callback_query(call.id, text="Загрузка матчей...")
-    bot.send_chat_action(call.message.chat.id, "typing")
-
-    mapping = {
-        "fb_dt_today": ("сегодня", ""),
-        "fb_dt_yesterday": ("вчера", ""),
-        "fb_dt_tomorrow": ("завтра", ""),
-        "fb_lg_premier": ("сегодня", "premier"),
-        "fb_lg_premier league": ("сегодня", "premier league"),
-        "fb_lg_laliga": ("сегодня", "laliga"),
-        "fb_lg_serie a": ("сегодня", "serie a"),
-        "fb_lg_bundesliga": ("сегодня", "bundesliga"),
-        "fb_lg_champions league": ("сегодня", "champions league"),
-        "hk_dt_today": ("сегодня", ""),
-        "hk_dt_yesterday": ("вчера", ""),
-        "hk_dt_tomorrow": ("завтра", ""),
-        "hk_lg_khl": ("сегодня", "khl"),
-        "hk_lg_nhl": ("сегодня", "nhl"),
-        "hk_lg_vhl": ("сегодня", "vhl")
-    }
-
-    q, l_filter = mapping.get(call.data, ("сегодня", ""))
-    result = fetch_sports_data(sport_type, q, l_filter)
-    bot.send_message(call.message.chat.id, result, parse_mode="HTML")
 
 # --- СВОДКИ СООБЩЕНИЙ ЧАТА ---
 
@@ -557,6 +278,27 @@ def handle_live_summary(message):
         bot.reply_to(message, f"<b>\U0001F4CB ИТОГИ С РАЗБОРОМ ПО УЧАСТНИКАМ:</b>\n\n{summary_text}", parse_mode="HTML")
     except Exception as e:
         bot.reply_to(message, f"Ошибка: {e}")
+
+def get_mode_keyboard():
+    keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
+    b_def = tele_types.InlineKeyboardButton("\U0001F504 Дефолт", callback_data="setmode_дефолт")
+    b_smart = tele_types.InlineKeyboardButton("\U0001F9E0 Умный", callback_data="setmode_умный")
+    b_diana = tele_types.InlineKeyboardButton("\U0001F484 Диана", callback_data="setmode_диана")
+    b_kardash = tele_types.InlineKeyboardButton("\U0001F953 Кардаш", callback_data="setmode_кардаш")
+    b_perfumer = tele_types.InlineKeyboardButton("\U0001F9EA Парфюмер", callback_data="setmode_парфюмер")
+    b_boss = tele_types.InlineKeyboardButton("\U0001F91F Тони (Босс)", callback_data="setmode_босс")
+    b_prorab = tele_types.InlineKeyboardButton("\U0001F6E0 Прораб", callback_data="setmode_прораб")
+    b_bratka = tele_types.InlineKeyboardButton("\U0001F44A Братка", callback_data="setmode_братка")
+    b_dushnila = tele_types.InlineKeyboardButton("\U0001F913 Душнила", callback_data="setmode_душнила")
+    b_sweet = tele_types.InlineKeyboardButton("\U0001F338 Милая", callback_data="setmode_милая")
+    b_edward = tele_types.InlineKeyboardButton("\U0001F9DB Эдвард", callback_data="setmode_эдвард")
+    keyboard.add(b_def, b_smart)
+    keyboard.add(b_diana, b_kardash)
+    keyboard.add(b_perfumer, b_boss)
+    keyboard.add(b_prorab, b_bratka)
+    keyboard.add(b_dushnila, b_sweet)
+    keyboard.add(b_edward)
+    return keyboard
 
 @bot.message_handler(commands=['mode', 'персонаж'])
 def handle_mode_switch(message):
@@ -673,13 +415,6 @@ def handle_message(message):
         if len(daily_chat_logs[message.chat.id]) > 400:
             daily_chat_logs[message.chat.id].pop(0)
 
-    if message.chat.id in awaiting_custom_date and not user_text.startswith("/"):
-        sport_target = awaiting_custom_date.pop(message.chat.id)
-        bot.send_chat_action(message.chat.id, "typing")
-        result = fetch_sports_data(sport_target, user_text)
-        bot.reply_to(message, result, parse_mode="HTML")
-        return
-
     if not check_group_trigger(message, user_text):
         return
 
@@ -734,10 +469,6 @@ def handle_message(message):
 
 def setup_bot_commands():
     commands = [
-        tele_types.BotCommand("calc", "Собрать комплект скважины под ключ"),
-        tele_types.BotCommand("price", "Прайс-лист кессонов МИШКА и вставок"),
-        tele_types.BotCommand("football", "Футбол (счет, матчи, лиги)"),
-        tele_types.BotCommand("hockey", "Хоккей (КХЛ, НХЛ, ВХЛ, счет)"),
         tele_types.BotCommand("mode", "Выбрать персонажа"),
         tele_types.BotCommand("summary", "Итог дня в чате"),
         tele_types.BotCommand("summary_test", "Тест сводки со стендапом")
