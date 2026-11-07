@@ -5,7 +5,7 @@ ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "551209811"))
 
 user_calc_sessions = {}
 
-# Каталог доп. расходников с переводом на все 5 языков
+# Каталог доп. расходников с переводом на 5 языков
 EXTRA_ITEMS = {
     "pnd32": {
         "unit_type": "meters",
@@ -97,7 +97,7 @@ EXTRA_ITEMS = {
     }
 }
 
-# Тексты интерфейса
+# Тексты интерфейса на 5 языках
 LANG_TEXTS = {
     "ru": {
         "lang_name": "Русский",
@@ -208,7 +208,7 @@ LANG_TEXTS = {
 
 
 def build_warehouse_checklist(data: dict) -> str:
-    """Формирует сборочный лист склада СТРОГО НА РУССКОМ ЯЗЫКЕ."""
+    """Формирует сборочный лист склада строго на русском языке."""
     depth = data["depth"]
     yield_flow = data["yield_flow"]
     houses = data["houses"]
@@ -333,7 +333,6 @@ def get_language_keyboard():
 
 
 def get_extras_keyboard(chat_id, lang):
-    """Клавиатура доп. материалов на выбранном языке с отметками выбора."""
     t = LANG_TEXTS.get(lang, LANG_TEXTS["ru"])
     session = user_calc_sessions.get(chat_id, {})
     extras = session.get("extras", {})
@@ -480,7 +479,6 @@ def register_calc_handlers(bot):
         markup = get_extras_keyboard(chat_id, lang)
         bot.send_message(chat_id, t["extras_title"], reply_markup=markup, parse_mode="HTML")
 
-    # Обработка клика по конкретному доп. товару
     @bot.callback_query_handler(func=lambda call: call.data.startswith("extra_pick_"))
     def handle_extra_pick(call):
         item_key = call.data.replace("extra_pick_", "")
@@ -519,8 +517,34 @@ def register_calc_handlers(bot):
                 user_calc_sessions[message.chat.id]["extras"] = {}
             user_calc_sessions[message.chat.id]["extras"][item_key] = qty
 
-            # Обновляем меню с галочкой
             show_extras_menu(message.chat.id, bot, lang)
         except (ValueError, TypeError):
             bot.reply_to(message, t["err_qty"])
-            bot.register_next_step_handler(message, lambda m: save_extra_quantity(m, bot, item_key,
+            bot.register_next_step_handler(message, lambda m: save_extra_quantity(m, bot, item_key, lang))
+
+    @bot.callback_query_handler(func=lambda call: call.data == "extra_finish")
+    def handle_extra_finish(call):
+        chat_id = call.message.chat.id
+        session = user_calc_sessions.get(chat_id, {})
+        lang = session.get("lang", "ru")
+        t = LANG_TEXTS.get(lang, LANG_TEXTS["ru"])
+
+        bot.answer_callback_query(call.id)
+
+        session["worker_tag"] = f"@{call.from_user.username}" if call.from_user.username else "нет username"
+        session["worker_name"] = f"{call.from_user.first_name or ''} {call.from_user.last_name or ''}".strip() or "Монтажник"
+        session["chat_id"] = chat_id
+
+        try:
+            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        except Exception:
+            pass
+
+        bot.send_message(chat_id, t["done"], parse_mode="HTML")
+
+        checklist = build_warehouse_checklist(session)
+        try:
+            bot.send_message(ADMIN_CHAT_ID, checklist, parse_mode="HTML")
+            print(f"[SUCCESS] Сборочный лист отправлен админу {ADMIN_CHAT_ID}")
+        except Exception as e:
+            print(f"[ERROR] Ошибка отправки админу {ADMIN_CHAT_ID}: {e}")
