@@ -12,7 +12,7 @@ from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 
-# Импорт модуля инженерного расчёта сметы скважин
+# Импорт инженерного модуля калькулятора и прайс-листа
 from calc_module import register_calc_handlers
 
 TELEGRAM_BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip().strip("'\"")
@@ -26,7 +26,7 @@ if not GEMINI_API_KEY:
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Регистрация модуля расчёта скважин
+# Регистрация модуля скважин и прайса
 register_calc_handlers(bot)
 
 ai_client = genai.Client(
@@ -734,9 +734,9 @@ def handle_message(message):
 
 def setup_bot_commands():
     commands = [
-        tele_types.BotCommand("calc", "Калькулятор скважины и смета под ключ"),
-        tele_types.BotCommand("smeta", "Расчёт оборудования с кессоном"),
-        tele_types.BotCommand("football", "Футбол (счет, вчера/сегодня/завтра, лиги)"),
+        tele_types.BotCommand("calc", "Собрать комплект скважины под ключ"),
+        tele_types.BotCommand("price", "Прайс-лист кессонов МИШКА и вставок"),
+        tele_types.BotCommand("football", "Футбол (счет, матчи, лиги)"),
         tele_types.BotCommand("hockey", "Хоккей (КХЛ, НХЛ, ВХЛ, счет)"),
         tele_types.BotCommand("mode", "Выбрать персонажа"),
         tele_types.BotCommand("summary", "Итог дня в чате"),
