@@ -260,18 +260,15 @@ def fetch_sofascore_data(sport: str, query: str = "", league_filter: str = "") -
 
     is_live = "live" in query.lower() or "лайв" in query.lower()
 
-    endpoints_to_try = []
     if is_live:
-        endpoints_to_try.append(
-            ("https://sofascore.p.rapidapi.com/events/schedule/live", {"sport": sport_name})
-        )
+        endpoints_to_try = [
+            ("https://sofascore.p.rapidapi.com/categories/list-live", {"sport": sport_name})
+        ]
     else:
-        endpoints_to_try.append(
-            ("https://sofascore.p.rapidapi.com/events/schedule/date", {"date": target_date, "sport": sport_name})
-        )
-        endpoints_to_try.append(
-            ("https://sofascore.p.rapidapi.com/tournaments/events", {"date": target_date, "sport": sport_name})
-        )
+        endpoints_to_try = [
+            ("https://sofascore.p.rapidapi.com/categories/list-live", {"sport": sport_name}),
+            ("https://sofascore.p.rapidapi.com/categories/list", {"sport": sport_name})
+        ]
 
     data = None
     last_err_text = ""
@@ -293,29 +290,29 @@ def fetch_sofascore_data(sport: str, query: str = "", league_filter: str = "") -
 
     raw_events = []
     if isinstance(data, dict):
-        if "events" in data:
-            raw_events = data["events"]
-        elif "tournaments" in data:
-            for t in data["tournaments"]:
-                raw_events.extend(t.get("events", []))
-        elif "categories" in data:
-            for cat in data["categories"]:
+        if "categories" in data:
+            for cat in data.get("categories", []):
+                cat_name = cat.get("name", "")
                 for tourn in cat.get("tournaments", []):
-                    raw_events.extend(tourn.get("events", []))
+                    t_name = tourn.get("name", "")
+                    for ev in tourn.get("events", []):
+                        ev["_cat"] = cat_name
+                        ev["_tourn"] = t_name
+                        raw_events.append(ev)
+        elif "events" in data:
+            raw_events = data["events"]
     elif isinstance(data, list):
         raw_events = data
 
     if not raw_events:
-        return f"Матчей по запросу <b>{sport_title}</b> на {date_label} ({target_date}) не найдено."
+        return f"Матчей по запросу <b>{sport_title}</b> на {date_label} ({target_date}) не найдено в базе live-трансляций."
 
     filter_word = (league_filter or "").lower()
 
     raw_items = []
     for e in raw_events:
-        tourn_obj = e.get("tournament", {})
-        tourn = tourn_obj.get("name", "Турнир")
-        cat_obj = tourn_obj.get("category", {})
-        category = cat_obj.get("name", "")
+        tourn = e.get("_tourn") or e.get("tournament", {}).get("name", "Турнир")
+        category = e.get("_cat") or e.get("tournament", {}).get("category", {}).get("name", "")
 
         full_title = f"{category} {tourn}".lower()
         if filter_word and filter_word not in full_title:
@@ -324,28 +321,30 @@ def fetch_sofascore_data(sport: str, query: str = "", league_filter: str = "") -
         home = e.get("homeTeam", {}).get("name", "Команда 1")
         away = e.get("awayTeam", {}).get("name", "Команда 2")
 
-        home_score = e.get("homeScore", {}).get("display", e.get("homeScore", {}).get("current", "-"))
-        away_score = e.get("awayScore", {}).get("display", e.get("awayScore", {}).get("current", "-"))
+        h_score_obj = e.get("homeScore") or {}
+        a_score_obj = e.get("awayScore") or {}
+        home_score = h_score_obj.get("display", h_score_obj.get("current", "-"))
+        away_score = a_score_obj.get("display", a_score_obj.get("current", "-"))
         status_desc = e.get("status", {}).get("description", "")
 
         raw_items.append(f"[{category} - {tourn}] {home} {home_score}:{away_score} {away} ({status_desc})")
-        if len(raw_items) >= 30:
+        if len(raw_items) >= 25:
             break
 
     if not raw_items:
-        return f"Матчей в категории <b>{league_filter.upper()}</b> на {date_label} не найдено."
+        return f"Матчей в категории <b>{league_filter.upper()}</b> на данный момент не найдено."
 
     raw_text = "\n".join(raw_items)
 
     translate_prompt = (
         f"Перед тобой перечень спортивных матчей ({sport_title}):\n"
         f'"""\n{raw_text}\n"""\n\n'
-        "Переведи названия клубов, стран и лиг НА РУССКИЙ ЯЗЫК и оформи аккуратный красивый отчет с эмодзи.\n"
+        "Переведи названия клубов, стран и лиг НА РУССКИЙ ЯЗЫК и оформи аккуратный читаемый отчет с эмодзи.\n"
         "Правила:\n"
         "1. Сгруппируй по турнирам (РПЛ, АПЛ, Ла Лига, КХЛ, НХЛ и т.д.).\n"
         "2. Формат строки: 'Команда1 Счет : Счет Команда2 (статус / минута)'.\n"
         "3. Статусы: Ended -> 'Завершен', Not started -> 'Не начался', In progress -> 'Идет игра'.\n"
-        "Сразу выдавай готовый список без лишних фраз."
+        "Сразу выдавай готовый переведенный список без лишних вступительных фраз."
     )
 
     translated = generate_ai_response(translate_prompt)
@@ -353,7 +352,7 @@ def fetch_sofascore_data(sport: str, query: str = "", league_filter: str = "") -
     icon = "\u26BD" if sport == "football" else "\U0001F3D2"
     return f"<b>{icon} {sport_title} - {label_show}:</b>\n\n{translated}"
 
-# --- КЛАВИАТУРЫ С БЕЗОПАСНЫМИ UNICODE ЭМОДЗИ И ФЛАГАМИ ---
+# --- КЛАВИАТУРЫ ---
 
 def get_football_main_keyboard():
     keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
