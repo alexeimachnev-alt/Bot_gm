@@ -204,212 +204,119 @@ def check_group_trigger(message, text: str) -> bool:
 
 # --- СПОРТИВНЫЙ МОДУЛЬ (SOFASCORE RAPIDAPI) ---
 
-def parse_sport_date(query: str):
-    moscow_tz = timezone(timedelta(hours=3))
-    now = datetime.now(moscow_tz)
+TOURNAMENT_IDS = {
+    "рпл": 325,
+    "апл": 17,
+    "ла лига": 8,
+    "серия а": 23,
+    "бундеслига": 35,
+    "лига чемпионов": 7,
+    "кхл": 354,
+    "нхл": 234,
+    "вхл": 355
+}
 
-    target_date = now.strftime("%Y-%m-%d")
-    date_label = "сегодня"
-    remaining_text = query.strip().lower()
-
-    if "вчера" in remaining_text:
-        target_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-        date_label = "вчера"
-    elif "завтра" in remaining_text:
-        target_date = (now + timedelta(days=1)).strftime("%Y-%m-%d")
-        date_label = "завтра"
-    elif "сегодня" in remaining_text:
-        target_date = now.strftime("%Y-%m-%d")
-        date_label = "сегодня"
-    else:
-        iso_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", remaining_text)
-        if iso_match:
-            target_date = iso_match.group(1)
-            date_label = target_date
-        else:
-            dot_match = re.search(r"\b(\d{1,2})[\.\/ -](\d{1,2})(?:[\.\/ -](\d{2,4}))?\b", remaining_text)
-            if dot_match:
-                day = int(dot_match.group(1))
-                month = int(dot_match.group(2))
-                raw_year = dot_match.group(3)
-                year = int(raw_year) if raw_year else now.year
-                if year < 100:
-                    year += 2000
-                try:
-                    dt = datetime(year, month, day)
-                    target_date = dt.strftime("%Y-%m-%d")
-                    date_label = target_date
-                except Exception:
-                    pass
-
-    return target_date, date_label
-
-def fetch_sofascore_data(sport: str, query: str = "", league_filter: str = "") -> str:
+def fetch_sofascore_tournament_matches(sport: str, tournament_id: int, mode: str = "last", league_title: str = "") -> str:
     if not FOOTBALL_API_KEY:
         return "[!] Переменная FOOTBALL_API_KEY не настроена на Render."
 
     clean_key = FOOTBALL_API_KEY.strip().strip("'\"")
-    target_date, date_label = parse_sport_date(query)
-    sport_name = "football" if sport == "football" else "ice-hockey"
-    sport_title = "ФУТБОЛ" if sport == "football" else "ХОККЕЙ"
-
     headers = {
         "x-rapidapi-key": clean_key,
         "x-rapidapi-host": "sofascore.p.rapidapi.com"
     }
 
-    is_live = "live" in query.lower() or "лайв" in query.lower()
+    # Эндпоинты раздела tournaments API Dojo
+    endpoint_name = "tournaments/get-last-matches" if mode == "last" else "tournaments/get-next-matches"
+    url = f"https://sofascore.p.rapidapi.com/{endpoint_name}"
+    params = {"tournamentId": tournament_id}
 
-    # Цепочка эндпоинтов Sofascore API (Api Dojo)
-    endpoints_to_try = []
-    if is_live:
-        endpoints_to_try.append(
-            ("https://sofascore.p.rapidapi.com/events/schedule/live", {"sport": sport_name})
+    sport_title = "ФУТБОЛ" if sport == "football" else "ХОККЕЙ"
+
+    try:
+        res = requests.get(url, headers=headers, params=params, timeout=12)
+        if res.status_code != 200:
+            # Резервный вызов через эндпоинт get-live-events
+            url_live = "https://sofascore.p.rapidapi.com/tournaments/get-live-events"
+            res = requests.get(url_live, headers=headers, params=params, timeout=12)
+
+        if res.status_code != 200:
+            return f"[!] Ошибка Sofascore: HTTP {res.status_code} ({res.text[:100]})"
+
+        data = res.json()
+        events = data.get("events") or []
+
+        if not events:
+            return f"Матчей в турнире <b>{league_title.upper()}</b> не найдено."
+
+        raw_items = []
+        for e in events[:20]:
+            home = e.get("homeTeam", {}).get("name", "Команда 1")
+            away = e.get("awayTeam", {}).get("name", "Команда 2")
+
+            h_score_obj = e.get("homeScore") or {}
+            a_score_obj = e.get("awayScore") or {}
+            home_score = h_score_obj.get("display", h_score_obj.get("current", "-"))
+            away_score = a_score_obj.get("display", a_score_obj.get("current", "-"))
+            status_desc = e.get("status", {}).get("description", "")
+
+            # Дата матча
+            start_ts = e.get("startTimestamp")
+            date_str = ""
+            if start_ts:
+                dt_obj = datetime.fromtimestamp(start_ts, tz=timezone(timedelta(hours=3)))
+                date_str = dt_obj.strftime("%d.%m %H:%M")
+
+            raw_items.append(f"{home} {home_score}:{away_score} {away} ({status_desc}, {date_str})")
+
+        raw_text = "\n".join(raw_items)
+
+        translate_prompt = (
+            f"Перед тобой перечень матчей ({sport_title} - {league_title}):\n"
+            f'"""\n{raw_text}\n"""\n\n'
+            "Переведи названия клубов НА РУССКИЙ ЯЗЫК и оформи аккуратный читаемый отчет с эмодзи.\n"
+            "Правила:\n"
+            "1. Заголовок турнира укажи сверху.\n"
+            "2. Формат строки: 'Команда1 Счет : Счет Команда2 (статус / время)'.\n"
+            "3. Статусы: Ended -> 'Завершен', Not started -> 'Не начался', In progress -> 'Идет игра'.\n"
+            "Сразу выдавай готовый отчет без лишних фраз."
         )
-        endpoints_to_try.append(
-            ("https://sofascore.p.rapidapi.com/categories/list-live", {"sport": sport_name})
-        )
-    else:
-        endpoints_to_try.append(
-            ("https://sofascore.p.rapidapi.com/events/schedule/date", {"date": target_date, "sport": sport_name})
-        )
-        endpoints_to_try.append(
-            ("https://sofascore.p.rapidapi.com/tournaments/events", {"date": target_date, "sport": sport_name})
-        )
-        # Альтернативный формат даты DD/MM/YYYY
-        try:
-            parts = target_date.split("-")
-            formatted_date_slash = f"{parts[2]}/{parts[1]}/{parts[0]}"
-            endpoints_to_try.append(
-                ("https://sofascore.p.rapidapi.com/events/schedule/date", {"date": formatted_date_slash, "sport": sport_name})
-            )
-        except Exception:
-            pass
 
-    data = None
-    last_err_text = ""
+        translated = generate_ai_response(translate_prompt)
+        icon = "\u26BD" if sport == "football" else "\U0001F3D2"
+        return f"<b>{icon} {sport_title} - {league_title.upper()}:</b>\n\n{translated}"
 
-    for url, params in endpoints_to_try:
-        try:
-            res = requests.get(url, headers=headers, params=params, timeout=12)
-            if res.status_code == 200:
-                data = res.json()
-                if data:
-                    break
-            else:
-                last_err_text = f"HTTP {res.status_code}: {res.text[:120]}"
-        except Exception as e:
-            last_err_text = str(e)
-
-    if not data:
-        return f"[!] Ошибка Sofascore: {last_err_text or 'Нет ответа от сервиса'}"
-
-    # Парсим структуру ответа Sofascore
-    raw_events = []
-    if isinstance(data, dict):
-        if "events" in data and isinstance(data["events"], list):
-            raw_events = data["events"]
-        elif "tournaments" in data and isinstance(data["tournaments"], list):
-            for t in data["tournaments"]:
-                raw_events.extend(t.get("events", []))
-        elif "categories" in data and isinstance(data["categories"], list):
-            for cat in data.get("categories", []):
-                cat_name = cat.get("name", "")
-                for tourn in cat.get("tournaments", []):
-                    t_name = tourn.get("name", "")
-                    for ev in tourn.get("events", []):
-                        ev["_cat"] = cat_name
-                        ev["_tourn"] = t_name
-                        raw_events.append(ev)
-    elif isinstance(data, list):
-        raw_events = data
-
-    if not raw_events:
-        return f"Матчей по запросу <b>{sport_title}</b> на {date_label} ({target_date}) не найдено в базе."
-
-    filter_word = (league_filter or "").lower()
-
-    raw_items = []
-    for e in raw_events:
-        tourn = e.get("_tourn") or e.get("tournament", {}).get("name", "Турнир")
-        category = e.get("_cat") or e.get("tournament", {}).get("category", {}).get("name", "")
-
-        full_title = f"{category} {tourn}".lower()
-        if filter_word and filter_word not in full_title:
-            continue
-
-        home = e.get("homeTeam", {}).get("name", "Команда 1")
-        away = e.get("awayTeam", {}).get("name", "Команда 2")
-
-        h_score_obj = e.get("homeScore") or {}
-        a_score_obj = e.get("awayScore") or {}
-        home_score = h_score_obj.get("display", h_score_obj.get("current", "-"))
-        away_score = a_score_obj.get("display", a_score_obj.get("current", "-"))
-        status_desc = e.get("status", {}).get("description", "")
-
-        raw_items.append(f"[{category} - {tourn}] {home} {home_score}:{away_score} {away} ({status_desc})")
-        if len(raw_items) >= 25:
-            break
-
-    if not raw_items:
-        return f"Матчей в категории <b>{league_filter.upper()}</b> на данный момент не найдено."
-
-    raw_text = "\n".join(raw_items)
-
-    translate_prompt = (
-        f"Перед тобой перечень спортивных матчей ({sport_title}):\n"
-        f'"""\n{raw_text}\n"""\n\n'
-        "Переведи названия клубов, стран и лиг НА РУССКИЙ ЯЗЫК и оформи аккуратный читаемый отчет с эмодзи.\n"
-        "Правила:\n"
-        "1. Сгруппируй по турнирам (РПЛ, АПЛ, Ла Лига, КХЛ, НХЛ и т.д.).\n"
-        "2. Формат строки: 'Команда1 Счет : Счет Команда2 (статус / минута)'.\n"
-        "3. Статусы: Ended -> 'Завершен', Not started -> 'Не начался', In progress -> 'Идет игра'.\n"
-        "Сразу выдавай готовый переведенный список без лишних вступительных фраз."
-    )
-
-    translated = generate_ai_response(translate_prompt)
-    label_show = league_filter.upper() if league_filter else f"{date_label.upper()} ({target_date})"
-    icon = "\u26BD" if sport == "football" else "\U0001F3D2"
-    return f"<b>{icon} {sport_title} - {label_show}:</b>\n\n{translated}"
+    except Exception as e:
+        return f"[!] Ошибка запроса матчей: {e}"
 
 # --- КЛАВИАТУРЫ ---
 
 def get_football_main_keyboard():
     keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
-    b_live = tele_types.InlineKeyboardButton("\u26A1 Лайв сейчас", callback_data="fb_live")
-    b_today = tele_types.InlineKeyboardButton("\U0001F4C5 Сегодня", callback_data="fb_today")
-    b_rpl = tele_types.InlineKeyboardButton("\U0001F1F7\U0001F1FA РПЛ (Россия)", callback_data="fb_lg_rpl")
-    b_apl = tele_types.InlineKeyboardButton("\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F АПЛ (Англия)", callback_data="fb_lg_apl")
-    b_laliga = tele_types.InlineKeyboardButton("\U0001F1EA\U0001F1F8 Ла Лига (Испания)", callback_data="fb_lg_laliga")
-    b_seriea = tele_types.InlineKeyboardButton("\U0001F1EE\U0001F1F9 Серия А (Италия)", callback_data="fb_lg_seriea")
-    b_buli = tele_types.InlineKeyboardButton("\U0001F1E9\U0001F1EA Бундеслига (Германия)", callback_data="fb_lg_buli")
-    b_ucl = tele_types.InlineKeyboardButton("\U0001F3C6 Лига Чемпионов", callback_data="fb_lg_ucl")
-    b_yesterday = tele_types.InlineKeyboardButton("\u23EA Вчера", callback_data="fb_yesterday")
-    b_tomorrow = tele_types.InlineKeyboardButton("\u23E9 Завтра", callback_data="fb_tomorrow")
-    b_custom = tele_types.InlineKeyboardButton("\U0001F5D3 Выбрать дату вручную", callback_data="fb_custom")
-    keyboard.add(b_live, b_today)
+    b_rpl = tele_types.InlineKeyboardButton("\U0001F1F7\U0001F1FA РПЛ (Россия)", callback_data="fb_tourn_rpl")
+    b_apl = tele_types.InlineKeyboardButton("\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F АПЛ (Англия)", callback_data="fb_tourn_apl")
+    b_laliga = tele_types.InlineKeyboardButton("\U0001F1EA\U0001F1F8 Ла Лига (Испания)", callback_data="fb_tourn_laliga")
+    b_seriea = tele_types.InlineKeyboardButton("\U0001F1EE\U0001F1F9 Серия А (Италия)", callback_data="fb_tourn_seriea")
+    b_buli = tele_types.InlineKeyboardButton("\U0001F1E9\U0001F1EA Бундеслига (Германия)", callback_data="fb_tourn_buli")
+    b_ucl = tele_types.InlineKeyboardButton("\U0001F3C6 Лига Чемпионов", callback_data="fb_tourn_ucl")
+    b_rpl_next = tele_types.InlineKeyboardButton("📅 Расписание РПЛ", callback_data="fb_next_rpl")
+    b_apl_next = tele_types.InlineKeyboardButton("📅 Расписание АПЛ", callback_data="fb_next_apl")
     keyboard.add(b_rpl, b_apl)
     keyboard.add(b_laliga, b_seriea)
     keyboard.add(b_buli, b_ucl)
-    keyboard.add(b_yesterday, b_tomorrow)
-    keyboard.add(b_custom)
+    keyboard.add(b_rpl_next, b_apl_next)
     return keyboard
 
 def get_hockey_main_keyboard():
     keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
-    b_live = tele_types.InlineKeyboardButton("\u26A1 Лайв сейчас", callback_data="hk_live")
-    b_today = tele_types.InlineKeyboardButton("\U0001F4C5 Сегодня", callback_data="hk_today")
-    b_khl = tele_types.InlineKeyboardButton("\U0001F1F7\U0001F1FA КХЛ", callback_data="hk_lg_khl")
-    b_nhl = tele_types.InlineKeyboardButton("\U0001F1FA\U0001F1F8 / \U0001F1E8\U0001F1E6 НХЛ", callback_data="hk_lg_nhl")
-    b_vhl = tele_types.InlineKeyboardButton("\U0001F1F7\U0001F1FA ВХЛ", callback_data="hk_lg_vhl")
-    b_yesterday = tele_types.InlineKeyboardButton("\u23EA Вчера", callback_data="hk_yesterday")
-    b_tomorrow = tele_types.InlineKeyboardButton("\u23E9 Завтра", callback_data="hk_tomorrow")
-    b_custom = tele_types.InlineKeyboardButton("\U0001F5D3 Выбрать дату вручную", callback_data="hk_custom")
-    keyboard.add(b_live, b_today)
+    b_khl = tele_types.InlineKeyboardButton("\U0001F1F7\U0001F1FA КХЛ (Счет)", callback_data="hk_tourn_khl")
+    b_nhl = tele_types.InlineKeyboardButton("\U0001F1FA\U0001F1F8 / \U0001F1E8\U0001F1E6 НХЛ (Счет)", callback_data="hk_tourn_nhl")
+    b_vhl = tele_types.InlineKeyboardButton("\U0001F1F7\U0001F1FA ВХЛ (Счет)", callback_data="hk_tourn_vhl")
+    b_khl_next = tele_types.InlineKeyboardButton("📅 Расписание КХЛ", callback_data="hk_next_khl")
+    b_nhl_next = tele_types.InlineKeyboardButton("📅 Расписание НХЛ", callback_data="hk_next_nhl")
     keyboard.add(b_khl, b_nhl)
     keyboard.add(b_vhl)
-    keyboard.add(b_yesterday, b_tomorrow)
-    keyboard.add(b_custom)
+    keyboard.add(b_khl_next, b_nhl_next)
     return keyboard
 
 def get_mode_keyboard():
@@ -448,14 +355,17 @@ def handle_football_cmd(message):
     if len(parts) == 1:
         bot.reply_to(
             message,
-            "\u26BD <b>Футбольный центр:</b>\nВыберите интересующую лигу, лайв или день:",
+            "\u26BD <b>Футбольный центр:</b>\nВыберите лигу для получения результатов или расписания:",
             reply_markup=get_football_main_keyboard(),
             parse_mode="HTML"
         )
         return
 
+    # Если написали текстом: /football рпл
+    q = parts[1].strip().lower()
+    t_id = TOURNAMENT_IDS.get(q, 325)
     bot.send_chat_action(message.chat.id, "typing")
-    result = fetch_sofascore_data("football", parts[1])
+    result = fetch_sofascore_tournament_matches("football", t_id, mode="last", league_title=q.upper())
     bot.reply_to(message, result, parse_mode="HTML")
 
 @bot.message_handler(commands=['hockey', 'хоккей'])
@@ -471,57 +381,48 @@ def handle_hockey_cmd(message):
     if len(parts) == 1:
         bot.reply_to(
             message,
-            "\U0001F3D2 <b>Хоккейный центр:</b>\nВыберите лигу (КХЛ, НХЛ, ВХЛ), лайв или день:",
+            "\U0001F3D2 <b>Хоккейный центр:</b>\nВыберите лигу (КХЛ, НХЛ, ВХЛ):",
             reply_markup=get_hockey_main_keyboard(),
             parse_mode="HTML"
         )
         return
 
+    q = parts[1].strip().lower()
+    t_id = TOURNAMENT_IDS.get(q, 354)
     bot.send_chat_action(message.chat.id, "typing")
-    result = fetch_sofascore_data("ice-hockey", parts[1])
+    result = fetch_sofascore_tournament_matches("ice-hockey", t_id, mode="last", league_title=q.upper())
     bot.reply_to(message, result, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith(("fb_", "hk_")))
 def handle_sport_callbacks(call):
-    is_football = call.data.startswith("fb_")
-    sport_type = "football" if is_football else "ice-hockey"
-
-    if call.data in ["fb_custom", "hk_custom"]:
-        awaiting_custom_date[call.message.chat.id] = sport_type
-        bot.answer_callback_query(call.id)
-        bot.send_message(
-            call.message.chat.id,
-            "<b>\U0001F5D3 Введите дату для поиска матчей:</b>\n(например: <code>15.10.2024</code> или <code>2024-11-05</code>):",
-            parse_mode="HTML"
-        )
-        return
-
     bot.answer_callback_query(call.id, text="Загрузка матчей...")
     bot.send_chat_action(call.message.chat.id, "typing")
 
     mapping = {
-        "fb_live": ("сегодня live", ""),
-        "fb_today": ("сегодня", ""),
-        "fb_yesterday": ("вчера", ""),
-        "fb_tomorrow": ("завтра", ""),
-        "fb_lg_rpl": ("сегодня", "premier league"),
-        "fb_lg_apl": ("сегодня", "premier league"),
-        "fb_lg_laliga": ("сегодня", "laliga"),
-        "fb_lg_seriea": ("сегодня", "serie a"),
-        "fb_lg_buli": ("сегодня", "bundesliga"),
-        "fb_lg_ucl": ("сегодня", "champions league"),
-        "hk_live": ("сегодня live", ""),
-        "hk_today": ("сегодня", ""),
-        "hk_yesterday": ("вчера", ""),
-        "hk_tomorrow": ("завтра", ""),
-        "hk_lg_khl": ("сегодня", "khl"),
-        "hk_lg_nhl": ("сегодня", "nhl"),
-        "hk_lg_vhl": ("сегодня", "vhl")
+        # Футбол: результаты
+        "fb_tourn_rpl": ("football", 325, "last", "РПЛ (Россия)"),
+        "fb_tourn_apl": ("football", 17, "last", "АПЛ (Англия)"),
+        "fb_tourn_laliga": ("football", 8, "last", "Ла Лига (Испания)"),
+        "fb_tourn_seriea": ("football", 23, "last", "Серия А (Италия)"),
+        "fb_tourn_buli": ("football", 35, "last", "Бундеслига (Германия)"),
+        "fb_tourn_ucl": ("football", 7, "last", "Лига Чемпионов"),
+        # Футбол: расписание
+        "fb_next_rpl": ("football", 325, "next", "Расписание РПЛ"),
+        "fb_next_apl": ("football", 17, "next", "Расписание АПЛ"),
+        # Хоккей: результаты
+        "hk_tourn_khl": ("ice-hockey", 354, "last", "КХЛ"),
+        "hk_tourn_nhl": ("ice-hockey", 234, "last", "НХЛ"),
+        "hk_tourn_vhl": ("ice-hockey", 355, "last", "ВХЛ"),
+        # Хоккей: расписание
+        "hk_next_khl": ("ice-hockey", 354, "next", "Расписание КХЛ"),
+        "hk_next_nhl": ("ice-hockey", 234, "next", "Расписание НХЛ")
     }
 
-    q, l_filter = mapping.get(call.data, ("сегодня", ""))
-    result = fetch_sofascore_data(sport_type, q, l_filter)
-    bot.send_message(call.message.chat.id, result, parse_mode="HTML")
+    item = mapping.get(call.data)
+    if item:
+        sport, t_id, mode, title = item
+        result = fetch_sofascore_tournament_matches(sport, t_id, mode=mode, league_title=title)
+        bot.send_message(call.message.chat.id, result, parse_mode="HTML")
 
 # --- СВОДКИ СООБЩЕНИЙ ЧАТА ---
 
@@ -714,13 +615,6 @@ def handle_message(message):
         if len(daily_chat_logs[message.chat.id]) > 400:
             daily_chat_logs[message.chat.id].pop(0)
 
-    if message.chat.id in awaiting_custom_date and not user_text.startswith("/"):
-        sport_target = awaiting_custom_date.pop(message.chat.id)
-        bot.send_chat_action(message.chat.id, "typing")
-        result = fetch_sofascore_data(sport_target, user_text)
-        bot.reply_to(message, result, parse_mode="HTML")
-        return
-
     if not check_group_trigger(message, user_text):
         return
 
@@ -775,8 +669,8 @@ def handle_message(message):
 
 def setup_bot_commands():
     commands = [
-        tele_types.BotCommand("football", "Футбол (лиги, счет, лайв)"),
-        tele_types.BotCommand("hockey", "Хоккей (КХЛ, НХЛ, лайв)"),
+        tele_types.BotCommand("football", "Футбол (счет и расписание по лигам)"),
+        tele_types.BotCommand("hockey", "Хоккей (КХЛ, НХЛ, ВХЛ)"),
         tele_types.BotCommand("mode", "Выбрать персонажа"),
         tele_types.BotCommand("summary", "Итог дня в чате"),
         tele_types.BotCommand("summary_test", "Тест сводки со стендапом")
