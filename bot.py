@@ -4,6 +4,7 @@ import threading
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from flask import Flask
+import requests
 import telebot
 from google import genai
 from google.genai import types
@@ -11,6 +12,7 @@ from google.genai.errors import APIError
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY") or "").strip().strip("'\"")
+FOOTBALL_API_KEY = (os.getenv("FOOTBALL_API_KEY") or "").strip().strip("'\"")
 
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN не задан в переменных окружения!")
@@ -30,7 +32,6 @@ def health_check():
 chat_modes = {}
 daily_chat_logs = {}
 
-# Реалистичный вчерашний диалог для теста персонального разбора
 MOCK_YESTERDAY_LOGS = [
     {"user": "@Bondar_17", "text": "Я минус дядь, я думал с ночевкой еду. Так не вариант вообще мотаться на таху рубль, там еще 2, и после футбола домой пиздовать через всю страну"},
     {"user": "Никита Кардаш", "text": "Бля у нас просто даже на таху нету, мы бы стартанули. У меня зп завтра только. Так бы мы к тебе стартанули с Валерой"},
@@ -41,6 +42,27 @@ MOCK_YESTERDAY_LOGS = [
     {"user": "Диана", "text": "Бондарь, хватит ныть про свои копейки на такси, нищеброд! Мой Кардаш себе новые адики взял, а ты считаешь рубли на маршрутку. Мы с ним кайфуем, завидуй молча!"},
     {"user": "Екатерина", "text": "Кто-нибудь разбирается в молекулярных духах? Хочу шлейфовый нишевый аромат на осень, посоветуйте пирамиду"}
 ]
+
+# ID популярных лиг в API-Football
+LEAGUE_ALIASES = {
+    "рпл": 235,
+    "россия": 235,
+    "апл": 39,
+    "англия": 39,
+    "ла лига": 140,
+    "лалига": 140,
+    "испания": 140,
+    "серия а": 135,
+    "италия": 135,
+    "бундеслига": 78,
+    "германия": 78,
+    "лига 1": 61,
+    "франция": 61,
+    "лч": 2,
+    "лига чемпионов": 2,
+    "ле": 3,
+    "лига европы": 3
+}
 
 CHARACTERS = {
     "дефолт": "",
@@ -120,53 +142,29 @@ BREVITY_RULE = (
     "(или 2-3 коротких пункта), сохраняя при этом заданный характер и суть ответа."
 )
 
-cached_working_models = []
-
 def get_candidate_models():
-    global cached_working_models
-    if cached_working_models:
-        return cached_working_models
-
-    candidates = []
-    try:
-        for m in ai_client.models.list():
-            name = m.name.replace("models/", "")
-            if "flash" in name.lower() or "gemini" in name.lower():
-                candidates.append(name)
-        candidates.sort(key=lambda x: ("flash" in x, "lite" in x), reverse=True)
-    except Exception:
-        candidates = ["gemini-2.0-flash", "gemini-2.0-flash-lite"]
-
-    if "gemini-2.0-flash" in candidates:
-        candidates.remove("gemini-2.0-flash")
-        candidates.insert(0, "gemini-2.0-flash")
-    else:
-        candidates.insert(0, "gemini-2.0-flash")
-
-    cached_working_models = candidates
-    return candidates
+    # Фиксированные стабильные модели без несуществующих превью
+    return [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash"
+    ]
 
 def generate_ai_response(contents_payload) -> str:
-    global cached_working_models
     models = get_candidate_models()
     last_error = None
 
-    for model_name in list(models):
+    for model_name in models:
         try:
             response = ai_client.models.generate_content(
                 model=model_name,
                 contents=contents_payload,
             )
             if response.text:
-                if model_name in cached_working_models:
-                    cached_working_models.remove(model_name)
-                    cached_working_models.insert(0, model_name)
                 return response.text
         except APIError as e:
             last_error = e
             if e.code in [404, 503, 429]:
-                if model_name in cached_working_models and len(cached_working_models) > 1:
-                    cached_working_models.remove(model_name)
                 time.sleep(1)
                 continue
             break
@@ -219,8 +217,96 @@ def check_group_trigger(message, text: str) -> bool:
 
     return is_private or is_mentioned or is_reply_to_bot or is_called_by_name
 
+# --- ФУТБОЛЬНЫЙ МОДУЛЬ НА РУССКОМ ЯЗЫКЕ ---
+def fetch_football_data(query: str = "") -> str:
+    if not FOOTBALL_API_KEY:
+        return "⚠️ Переменная <code>FOOTBALL_API_KEY</code> не настроена на сервере Render."
+
+    url = "https://v3.football.api-sports.io/fixtures"
+    headers = {"x-apisports-key": FOOTBALL_API_KEY}
+    today_str = datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m-%d")
+
+    clean_q = query.strip().lower()
+    league_id = LEAGUE_ALIASES.get(clean_q)
+
+    params = {}
+    title_suffix = ""
+
+    if league_id:
+        params["league"] = league_id
+        # Для текущего футбольного сезона берем актуальный год
+        current_year = datetime.now().year
+        params["season"] = current_year if datetime.now().month >= 7 else (current_year - 1)
+        params["date"] = today_str
+        title_suffix = f"({clean_q.upper()})"
+    elif clean_q:
+        # Если указано неизвестное название, запрашиваем live
+        params["live"] = "all"
+        title_suffix = f"(поиск: {clean_q})"
+    else:
+        # По умолчанию смотрим live матчи
+        params["live"] = "all"
+
+    try:
+        res = requests.get(url, headers=headers, params=params, timeout=10)
+        data = res.json()
+        fixtures = data.get("response", [])
+
+        # Если в лайве по конкретной лиге пусто — забираем все сегодняшние этой лиги
+        if not fixtures and "live" in params:
+            res_today = requests.get(url, headers=headers, params={"date": today_str}, timeout=10)
+            data_today = res_today.json()
+            fixtures = data_today.get("response", [])
+
+        if not fixtures:
+            return f"⚽ По запросу {title_suffix} матчей на сегодня не найдено."
+
+        # Собираем сырые данные для перевода
+        raw_items = []
+        for f in fixtures[:18]:
+            l_name = f["league"]["name"]
+            country = f["league"]["country"]
+            home = f["teams"]["home"]["name"]
+            away = f["teams"]["away"]["name"]
+            status = f["fixture"]["status"]["short"]
+            elapsed = f["fixture"]["status"]["elapsed"]
+            g_home = f["goals"]["home"] if f["goals"]["home"] is not None else "-"
+            g_away = f["goals"]["away"] if f["goals"]["away"] is not None else "-"
+            time_mark = f"{elapsed}'" if elapsed else status
+
+            raw_items.append(f"[{country} - {l_name}] {home} {g_home}:{g_away} {away} (Status: {time_mark})")
+
+        raw_text = "\n".join(raw_items)
+
+        # Перевод названий клубов и красивое оформление через Gemini
+        translate_prompt = (
+            "Перед тобой список футбольных матчей с их статусом и счетом:\n"
+            f"\"\"\"\n{raw_text}\n\"\"\"\n\n"
+            "Твоя задача — перевести все названия команд, стран и лиг НА РУССКИЙ ЯЗЫК и красиво структурировать.\n"
+            "Правила оформления:\n"
+            "1. Сгруппируй по турнирам (например: 🏆 РПЛ, 🏴󠁧󠁢󠁥󠁮󠁧󠁿 АПЛ, 🇪🇸 Ла Лига и т.д.).\n"
+            "2. Выведи каждую строчку аккуратно: 'Команда1 Счет : Счет Команда2 (минута / статус)'.\n"
+            "3. Статусы: переведи FT как 'Матч завершен', HT как 'Перерыв', NS как 'Не начался', live-минуты пиши просто (напр. '34 мин').\n"
+            "Не добавляй вступительных слов, сразу выдай готовый список."
+        )
+
+        translated = generate_ai_response(translate_prompt)
+        return f"⚽ <b>ФУТБОЛЬНЫЕ РЕЗУЛЬТАТЫ {title_suffix}:</b>\n\n{translated}"
+
+    except Exception as e:
+        return f"⚠️ Ошибка при получении данных: {e}"
+
+@bot.message_handler(commands=['football', 'футбол', 'матчи', 'счет'])
+def handle_football_cmd(message):
+    bot.send_chat_action(message.chat.id, "typing")
+    text = message.text or ""
+    parts = text.split(maxsplit=1)
+    query = parts[1].strip() if len(parts) > 1 else ""
+
+    result = fetch_football_data(query)
+    bot.reply_to(message, result, parse_mode="HTML")
+
 def build_summary_from_messages(logs) -> str:
-    """Группирует сообщения по каждому автору и генерирует персональный разбор + общий итог."""
     user_messages = defaultdict(list)
     for entry in logs:
         user_messages[entry['user']].append(entry['text'])
@@ -228,7 +314,7 @@ def build_summary_from_messages(logs) -> str:
     users_digest = ""
     for u_name, msgs in user_messages.items():
         sample = " | ".join(msgs[-12:])
-        users_digest += f"Участник [{u_name}] (сообщений: {len(msgs)}):\nЦитаты и тезисы: \"{sample}\"\n\n"
+        users_digest += f"Участник [{u_name}] (сообщений: {len(msgs)}):\nЦитаты: \"{sample}\"\n\n"
 
     summary_prompt = (
         "Ты — остроумный, ироничный обозреватель и стендап-комик в Telegram-чате.\n"
@@ -241,23 +327,19 @@ def build_summary_from_messages(logs) -> str:
         "   - Выдай ему смешную номинацию (например: 'Экономист на такси', 'Ветеран Wildberries за 3500', 'Мисс токсичность').\n"
         "   - С юмором прокомментируй его поведение: на что жаловался, чем хвастался, где затупил или о чем спорил, опираясь на его реальные слова.\n\n"
         "2. 🔥 ГЛАВНЫЙ СЮЖЕТ И СПЛЕТНИ ДНЯ:\n"
-        "   - Опиши 1-2 главных конфликта или темы, вокруг которых бурлил чат (деньги, шмотки, спорт, отношения и т.д.).\n\n"
+        "   - Опиши 1-2 главных конфликта или темы, вокруг которых бурлил чат.\n\n"
         "3. 🌙 МОРАЛЬ НА НОЧЬ:\n"
-        "   - Одна угарная финальная фраза-пожелание перед сном.\n\n"
-        "Пиши живо, дерзко, без унылой банальщины и канцелярита!"
+        "   - Финальная смешная фраза перед сном.\n\n"
+        "Пиши дерзко, весело, без канцелярита!"
     )
     return generate_ai_response(summary_prompt)
 
 def scheduler_thread():
-    """Фоновый поток: проверяет время и ровно в 23:00 по Москве публикует итог дня."""
-    print("Планировщик итогов дня запущен (цель: 23:00 MSK)...")
     moscow_tz = timezone(timedelta(hours=3))
-
     while True:
         try:
             now = datetime.now(moscow_tz)
             if now.hour == 23 and now.minute == 0:
-                print(f"[{now.strftime('%H:%M:%S')}] Публикация вечерних итогов дня...")
                 chats_to_process = list(daily_chat_logs.keys())
                 for c_id in chats_to_process:
                     logs = daily_chat_logs.get(c_id, [])
@@ -278,27 +360,20 @@ def scheduler_thread():
 
 @bot.message_handler(commands=['summary_test', 'тест_итоги'])
 def handle_test_summary(message):
-    """Мгновенная проверка генерации персонального разбора."""
     bot.send_chat_action(message.chat.id, "typing")
     try:
         summary_text = build_summary_from_messages(MOCK_YESTERDAY_LOGS)
-        bot.reply_to(
-            message,
-            f"🧪 <b>ТЕСТОВЫЙ РАЗБОР ПО КАЖДОМУ УЧАСТНИКУ:</b>\n\n{summary_text}",
-            parse_mode="HTML"
-        )
+        bot.reply_to(message, f"🧪 <b>ТЕСТОВЫЙ РАЗБОР ПО УЧАСТНИКАМ:</b>\n\n{summary_text}", parse_mode="HTML")
     except Exception as e:
         bot.reply_to(message, f"Ошибка: {e}")
 
 @bot.message_handler(commands=['summary', 'итоги'])
 def handle_live_summary(message):
-    """Итоги на основе реальных сообщений за сегодня с разбором каждого участника."""
     bot.send_chat_action(message.chat.id, "typing")
     logs = daily_chat_logs.get(message.chat.id, [])
     if not logs or len(logs) < 3:
         bot.reply_to(message, "Сегодня в чате пока маловато сообщений. Напишите пару фраз или проверьте через <code>/summary_test</code>!", parse_mode="HTML")
         return
-
     try:
         summary_text = build_summary_from_messages(logs)
         bot.reply_to(message, f"📊 <b>ИТОГИ С РАЗБОРОМ ПО УЧАСТНИКАМ:</b>\n\n{summary_text}", parse_mode="HTML")
@@ -323,10 +398,12 @@ def handle_mode_switch(message):
             message,
             f"Текущий режим чата: <b>{current.upper()}</b>\n\n"
             f"Доступные роли:\n{modes_list}\n\n"
-            f"Команды дайджеста:\n"
-            f"• <code>/summary_test</code> — проверить персональный разбор прямо сейчас\n"
-            f"• <code>/summary</code> — итоги из текущей переписки\n"
-            f"• Автоматический итог приходит каждый день ровно в <b>23:00</b>.",
+            f"Футбольные команды:\n"
+            f"• <code>/football</code> — лайв матчи\n"
+            f"• <code>/football рпл</code> — матчи России\n"
+            f"• <code>/football апл</code> — матчи Англии\n"
+            f"• <code>/football испания</code> — Ла Лига\n"
+            f"• <code>/football италия</code> — Серия А",
             parse_mode="HTML"
         )
         return
@@ -335,41 +412,20 @@ def handle_mode_switch(message):
     if selected in CHARACTERS:
         chat_modes[message.chat.id] = selected
         if selected == "дефолт":
-            bot.reply_to(
-                message,
-                "⚙️ Режим сброшен на: <b>ДЕФОЛТ</b>.\nОтветы короткие (1-2 абзаца). Все личности и триггеры отключены.",
-                parse_mode="HTML"
-            )
+            bot.reply_to(message, "⚙️ Режим сброшен на: <b>ДЕФОЛТ</b>.\nВсе личности и триггеры отключены.", parse_mode="HTML")
         elif selected == "умный":
-            bot.reply_to(
-                message,
-                "🧠 Включен режим: <b>УМНЫЙ</b>!\nБот отвечает максимально подробно, экспертно и развернуто.",
-                parse_mode="HTML"
-            )
+            bot.reply_to(message, "🧠 Включен режим: <b>УМНЫЙ</b>!\nБот отвечает максимально подробно.", parse_mode="HTML")
         elif selected == "парфюмер":
-            bot.reply_to(
-                message,
-                "🌸 Включен режим: <b>ПАРФЮМЕР</b>!\nБот готов детально разбирать пирамиды и ольфакторные нюансы.",
-                parse_mode="HTML"
-            )
+            bot.reply_to(message, "🌸 Включен режим: <b>ПАРФЮМЕР</b>!\nРазвернутый разбор ароматов и пирамид.", parse_mode="HTML")
         else:
-            bot.reply_to(
-                message,
-                f"🎭 Режим успешно включен: <b>{selected.upper()}</b>!",
-                parse_mode="HTML"
-            )
+            bot.reply_to(message, f"🎭 Режим успешно включен: <b>{selected.upper()}</b>!", parse_mode="HTML")
     else:
-        bot.reply_to(
-            message,
-            f"Не знаю роли '{selected}'. Отправь <code>/mode</code> для списка.",
-            parse_mode="HTML"
-        )
+        bot.reply_to(message, f"Не знаю роли '{selected}'. Отправь <code>/mode</code> для списка.", parse_mode="HTML")
 
 # 1. Фото
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     caption = message.caption or ""
-
     sender_username = message.from_user.username
     sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
 
