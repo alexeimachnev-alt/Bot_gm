@@ -143,8 +143,4 @@ def generate_ai_response(contents_payload) -> str:
                 contents=contents_payload,
             )
             if response.text:
-                if model_name in cached_working_models:
-                    cached_working_models.remove(model_name)
-                    cached_working_models.insert(0, model_name)
-                return response.text
-        except API
+                if model_name in
