@@ -21,10 +21,8 @@ if not GEMINI_API_KEY:
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-ai_client = genai.Client(
-    api_key=GEMINI_API_KEY,
-    http_options=types.HttpOptions(api_version="v1beta")
-)
+# Инициализация без принудительного v1beta для стабильной работы Free Tier
+ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 app = Flask(__name__)
 
@@ -126,17 +124,15 @@ BREVITY_RULE = (
 )
 
 def get_candidate_models():
-    # Модели с высоким бесплатным суточным лимитом идут первыми
     return [
+        "gemini-2.5-flash",
         "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
-        "gemini-1.5-flash",
-        "gemini-2.5-flash"
+        "gemini-2.5-pro"
     ]
 
 def generate_ai_response(contents_payload) -> str:
     models = get_candidate_models()
-    last_error = None
+    errors_log = []
 
     for model_name in models:
         try:
@@ -144,19 +140,18 @@ def generate_ai_response(contents_payload) -> str:
                 model=model_name,
                 contents=contents_payload,
             )
-            if response.text:
+            if response and response.text:
                 return response.text
         except APIError as e:
-            last_error = e
-            # 429 (исчерпан лимит дня) или 503 (сервер перегружен) — сразу берем другую модель
-            if e.code in [429, 503, 404]:
-                continue
-            break
+            msg = getattr(e, "message", str(e))
+            errors_log.append(f"{model_name}: [{e.code}] {msg[:80]}")
+            continue
         except Exception as e:
-            last_error = e
+            errors_log.append(f"{model_name}: {str(e)[:80]}")
             continue
 
-    raise last_error or Exception("Серверы нейросети временно заняты. Попробуйте написать через минуту.")
+    details = " | ".join(errors_log) if errors_log else "Неизвестная ошибка вызова"
+    raise Exception(f"Сбой моделей: {details}")
 
 def send_long_message(chat_id: int, text: str, reply_to_id: int = None):
     if not text:
@@ -199,8 +194,6 @@ def check_group_trigger(message, text: str) -> bool:
     is_called_by_name = any(name in lower_text for name in all_names)
 
     return is_private or is_mentioned or is_reply_to_bot or is_called_by_name
-
-# --- СВОДКИ СООБЩЕНИЙ ЧАТА ---
 
 def build_summary_from_messages(logs) -> str:
     user_messages = defaultdict(list)
@@ -396,7 +389,7 @@ def handle_photo(message):
         reply_text = generate_ai_response([image_part, final_prompt])
         send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        send_long_message(message.chat.id, "Нейросеть сейчас обрабатывает много запросов. Попробуйте отправить фото еще раз через минуту.", reply_to_id=message.message_id)
+        send_long_message(message.chat.id, f"Ошибка Gemini: {e}", reply_to_id=message.message_id)
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -462,7 +455,7 @@ def handle_message(message):
         reply_text = generate_ai_response(final_prompt)
         send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        send_long_message(message.chat.id, "Серверы Gemini временно загружены. Попробуйте повторить вопрос через полминуты.", reply_to_id=message.message_id)
+        send_long_message(message.chat.id, f"Ошибка Gemini: {e}", reply_to_id=message.message_id)
 
 def setup_bot_commands():
     commands = [
@@ -477,20 +470,25 @@ def setup_bot_commands():
 
 def run_telebot():
     print("Инициализация Telegram polling...")
+    time.sleep(5)
     try:
         bot.delete_webhook(drop_pending_updates=True)
         time.sleep(2)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Предупреждение при сбросе вебхука: {e}")
 
     setup_bot_commands()
     print("Telegram polling запущен...")
     while True:
         try:
-            bot.polling(none_stop=True, interval=1, timeout=20)
+            bot.polling(none_stop=True, interval=2, timeout=20)
         except Exception as e:
-            print(f"Сбой polling: {e}. Перезапуск через 3 сек...")
-            time.sleep(3)
+            if "409" in str(e):
+                print("Обнаружен конфликт сессий (409). Ожидание 15 секунд...")
+                time.sleep(15)
+            else:
+                print(f"Сбой polling: {e}. Перезапуск через 5 сек...")
+                time.sleep(5)
 
 if __name__ == "__main__":
     t_bot = threading.Thread(target=run_telebot, daemon=True)
