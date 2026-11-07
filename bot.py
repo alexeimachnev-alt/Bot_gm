@@ -86,8 +86,8 @@ CHARACTERS = {
         "Твоя роль: утонченный, высококлассный парфюмерный эксперт, нос и коллекционер нишевых и люксовых ароматов. "
         "Ты безупречно разбираешься в ольфакторных пирамидах: верхних нотах, сердце и базе аромата, стойкости, диффузности и шлейфе (силлаже). "
         "Знаешь все культовые бренды, парфюмерные дома и нишевых мастеров (от классики Guerlain и Chanel до Frederic Malle, Byredo, Kilian, Tom Ford, Xerjoff, Le Labo). "
-        "Можешь профессионально разобрать любой парфюм по нотам, объяснить химию раскрытия на коже, разницу между синтетическими молекулами (ISO E Super, амброксан) "
-        "и натуральными абсолютами, а также подобрать похожий аромат или фланкер. Общаешься вдохновенно, эстетично и со знанием тончайших нюансов."
+        "Можешь профессионально и подробно разобрать любой парфюм по нотам, объяснить химию раскрытия на коже, разницу между синтетическими молекулами (ISO E Super, амброксан) "
+        "и натуральными абсолютами, а также подобрать похожий аромат или фланкер. Давай развернутые, глубокие и вдохновляющие ответы, полностью передавая характер композиции."
     ),
     "эдвард": (
         "Твоя роль: Эдвард Каллен из саги 'Сумерки'. Ты полностью знаешь всю вселенную саги Стефани Майер, все фильмы, "
@@ -222,7 +222,7 @@ def handle_mode_switch(message):
             message,
             f"Текущий режим чата: <b>{current.upper()}</b>\n\n"
             f"Доступные роли:\n{modes_list}\n\n"
-            f"Чтобы включить развернутые ответы: <code>/mode умный</code>\n"
+            f"Чтобы включить развернутые ответы: <code>/mode умный</code> или <code>/mode парфюмер</code>\n"
             f"Чтобы включить компактные ответы: <code>/mode дефолт</code>",
             parse_mode="HTML"
         )
@@ -241,6 +241,12 @@ def handle_mode_switch(message):
             bot.reply_to(
                 message,
                 "🧠 Включен режим: <b>УМНЫЙ</b>!\nБот отвечает максимально подробно, экспертно и развернуто.",
+                parse_mode="HTML"
+            )
+        elif selected == "парфюмер":
+            bot.reply_to(
+                message,
+                "🌸 Включен режим: <b>ПАРФЮМЕР</b>!\nБот готов детально и развернуто разбирать любые пирамиды и ароматы.",
                 parse_mode="HTML"
             )
         else:
@@ -286,7 +292,8 @@ def handle_photo(message):
             current_role = "эдвард"
 
     system_instruction = CHARACTERS.get(current_role, "")
-    brevity = "" if current_role == "умный" else f"{BREVITY_RULE}\n\n"
+    # Для режимов "умный" и "парфюмер" ограничение краткости снимается
+    brevity = "" if current_role in ["умный", "парфюмер"] else f"{BREVITY_RULE}\n\n"
 
     sender_username = message.from_user.username
     sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
@@ -349,7 +356,8 @@ def handle_message(message):
             current_role = "эдвард"
 
     system_instruction = CHARACTERS.get(current_role, "")
-    brevity = "" if current_role == "умный" else f"{BREVITY_RULE}\n\n"
+    # Для режимов "умный" и "парфюмер" ограничение краткости снимается
+    brevity = "" if current_role in ["умный", "парфюмер"] else f"{BREVITY_RULE}\n\n"
 
     sender_username = message.from_user.username
     sender_info = f"@{sender_username}" if sender_username else (message.from_user.first_name or "Участник")
