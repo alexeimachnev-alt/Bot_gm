@@ -97,7 +97,88 @@ EXTRA_ITEMS = {
     }
 }
 
-# Тексты интерфейса на 5 языках
+# Данные официального прайса «МИШКА»
+PRICE_DATA = {
+    "m1": (
+        "🐻 <b>КЕССОНЫ МИШКА 1 (Ø1050 мм)</b>\n"
+        "<i>Материал: первичный монолитный полипропилен</i>\n\n"
+        "🔹 <b>Мишка 1 (H=2000 мм):</b>\n"
+        "• Проходной (без фланца): ОПТ <b>36 650 ₽</b> | МРЦ 58 000 ₽\n"
+        "• Фланец 125/133 мм: ОПТ <b>39 650 ₽</b> | МРЦ 61 000 ₽\n"
+        "• Фланец 159 мм: ОПТ <b>42 650 ₽</b> | МРЦ 64 000 ₽\n\n"
+        "🔹 <b>Мишка 1 LONG (H=2500 мм):</b>\n"
+        "• Проходной (без фланца): ОПТ <b>49 650 ₽</b> | МРЦ 78 000 ₽\n"
+        "• Фланец 125/133 мм: ОПТ <b>52 650 ₽</b> | МРЦ 81 000 ₽\n"
+        "• Фланец 159 мм: ОПТ <b>56 650 ₽</b> | МРЦ 85 000 ₽\n\n"
+        "<i>* Сгоны d32 мм (комплект 4 шт.): +1 520 ₽</i>"
+    ),
+    "m2": (
+        "🐻 <b>КЕССОНЫ МИШКА 2 (Ø1300 мм)</b>\n"
+        "<i>Материал: первичный монолитный полипропилен</i>\n\n"
+        "🔹 <b>Мишка 2 (H=2000 мм):</b>\n"
+        "• Проходной (без фланца): ОПТ <b>47 700 ₽</b> | МРЦ 75 000 ₽\n"
+        "• Фланец 125/133 мм: ОПТ <b>50 700 ₽</b> | МРЦ 78 000 ₽\n"
+        "• Фланец 159 мм: ОПТ <b>53 300 ₽</b> | МРЦ 82 000 ₽\n\n"
+        "🔹 <b>Мишка 2 LONG (H=2500 мм):</b>\n"
+        "• Проходной (без фланца): ОПТ <b>57 800 ₽</b> | МРЦ 89 000 ₽\n"
+        "• Фланец 125/133 мм: ОПТ <b>65 000 ₽</b> | МРЦ 95 000 ₽\n"
+        "• Фланец 159 мм: ОПТ <b>68 800 ₽</b> | МРЦ 100 000 ₽\n\n"
+        "<i>* Сгоны d32 мм (комплект 4 шт.): +1 520 ₽</i>"
+    ),
+    "m3": (
+        "🐻 <b>КЕССОНЫ МИШКА 3 (Ø1600 мм)</b>\n"
+        "<i>Материал: первичный монолитный полипропилен</i>\n\n"
+        "🔹 <b>Мишка 3 (H=2000 мм):</b>\n"
+        "• Проходной (без фланца): ОПТ <b>70 000 ₽</b> | МРЦ 101 000 ₽\n"
+        "• Фланец 125/133 мм: ОПТ <b>76 500 ₽</b> | МРЦ 115 000 ₽\n"
+        "• Фланец 159 мм: ОПТ <b>81 300 ₽</b> | МРЦ 124 600 ₽\n\n"
+        "🔹 <b>Мишка 3 LONG (H=2500 мм):</b>\n"
+        "• Проходной (без фланца): ОПТ <b>113 200 ₽</b> | МРЦ 154 300 ₽\n"
+        "• Фланец 125/133 мм: ОПТ <b>118 300 ₽</b> | МРЦ 161 200 ₽\n"
+        "• Фланец 159 мм: ОПТ <b>124 200 ₽</b> | МРЦ 166 100 ₽\n\n"
+        "<i>* Сгоны d32 мм (комплект 4 шт.): +1 520 ₽</i>"
+    ),
+    "m4": (
+        "🐻 <b>КЕССОНЫ МИШКА 4 (Ø2100 мм)</b>\n"
+        "<i>Материал: первичный монолитный полипропилен</i>\n\n"
+        "🔹 <b>Мишка 4 (H=2000 мм):</b>\n"
+        "• Проходной (без фланца): ОПТ <b>145 900 ₽</b> | РРЦ 191 600 ₽\n"
+        "• Фланец 125/133 мм: ОПТ <b>156 000 ₽</b> | РРЦ 194 600 ₽\n"
+        "• Фланец 159 мм: ОПТ <b>164 111 ₽</b> | РРЦ 199 600 ₽\n\n"
+        "🔹 <b>Мишка 4 LONG (H=2500 мм):</b>\n"
+        "• Проходной (без фланца): ОПТ <b>199 000 ₽</b> | РРЦ 245 600 ₽\n"
+        "• Фланец 125/133 мм: ОПТ <b>204 050 ₽</b> | РРЦ 250 600 ₽\n"
+        "• Фланец 159 мм: ОПТ <b>213 000 ₽</b> | РРЦ 287 400 ₽\n\n"
+        "<i>* Сгоны d32 мм (комплект 4 шт.): +1 520 ₽</i>"
+    ),
+    "rings": (
+        "🧱 <b>ГЕРМЕТИЧНЫЕ ВСТАВКИ В Ж/Б КОЛОДЦЫ</b>\n"
+        "<i>Пластиковые вставки (D = диаметр, H = высота):</i>\n\n"
+        "🔹 <b>Диаметр 0.9 м (D=0.9):</b>\n"
+        "• H=0.9 м: ОПТ <b>18 750 ₽</b> | Розница 25 000 ₽\n"
+        "• H=1.8 м: ОПТ <b>33 750 ₽</b> | Розница 45 000 ₽\n"
+        "• H=2.7 м: ОПТ <b>40 213 ₽</b> | Розница 53 100 ₽\n"
+        "• H=3.6 м: ОПТ <b>55 738 ₽</b> | Розница 78 000 ₽\n"
+        "• H=4.5 м: ОПТ <b>80 500 ₽</b> | Розница 106 000 ₽\n"
+        "• H=5.4 м: ОПТ <b>96 875 ₽</b> | Розница 129 000 ₽\n\n"
+        "🔹 <b>Диаметр 1.4 м (D=1.4):</b>\n"
+        "• H=0.9 м: ОПТ <b>27 738 ₽</b> | Розница 48 000 ₽\n"
+        "• H=1.8 м: ОПТ <b>42 875 ₽</b> | Розница 56 000 ₽\n"
+        "• H=2.7 м: ОПТ <b>51 713 ₽</b> | Розница 78 000 ₽\n"
+        "• H=3.6 м: ОПТ <b>72 100 ₽</b> | Розница 99 000 ₽\n"
+        "• H=4.5 м: ОПТ <b>85 400 ₽</b> | Розница 122 000 ₽\n"
+        "• H=5.4 м: ОПТ <b>112 875 ₽</b> | Розница 132 000 ₽\n\n"
+        "🔹 <b>Диаметр 1.8 м (D=1.8):</b>\n"
+        "• H=0.9 м: ОПТ <b>45 000 ₽</b> | Розница 60 000 ₽\n"
+        "• H=1.8 м: ОПТ <b>60 000 ₽</b> | Розница 80 000 ₽\n"
+        "• H=2.7 м: ОПТ <b>80 000 ₽</b> | Розница 100 000 ₽\n"
+        "• H=3.6 м: ОПТ <b>100 000 ₽</b> | Розница 120 000 ₽\n"
+        "• H=4.5 м: ОПТ <b>119 000 ₽</b> | Розница 140 000 ₽\n"
+        "• H=5.4 м: ОПТ <b>135 000 ₽</b> | Розница 167 000 ₽"
+    )
+}
+
+# Тексты интерфейса опроса
 LANG_TEXTS = {
     "ru": {
         "lang_name": "Русский",
@@ -321,15 +402,30 @@ def build_warehouse_checklist(data: dict) -> str:
 
 def get_language_keyboard():
     keyboard = types.InlineKeyboardMarkup(row_width=2)
+    b_price = types.InlineKeyboardButton("🏷 Прайс КЕССОН МИШКА", callback_data="price_back_main")
     b_ru = types.InlineKeyboardButton("🇷🇺 Русский", callback_data="calc_lang_ru")
     b_tj = types.InlineKeyboardButton("🇹🇯 Тоҷикӣ", callback_data="calc_lang_tj")
     b_uz = types.InlineKeyboardButton("🇺🇿 Oʻzbekcha", callback_data="calc_lang_uz")
     b_hy = types.InlineKeyboardButton("🇦🇲 Հայերեն", callback_data="calc_lang_hy")
     b_ky = types.InlineKeyboardButton("🇰🇬 Кыргызча", callback_data="calc_lang_ky")
+    keyboard.add(b_price)
     keyboard.add(b_ru)
     keyboard.add(b_tj, b_uz)
     keyboard.add(b_hy, b_ky)
     return keyboard
+
+
+def get_price_categories_keyboard():
+    kb = types.InlineKeyboardMarkup(row_width=2)
+    b1 = types.InlineKeyboardButton("🐻 Мишка 1 (Ø1050)", callback_data="price_view_m1")
+    b2 = types.InlineKeyboardButton("🐻 Мишка 2 (Ø1300)", callback_data="price_view_m2")
+    b3 = types.InlineKeyboardButton("🐻 Мишка 3 (Ø1600)", callback_data="price_view_m3")
+    b4 = types.InlineKeyboardButton("🐻 Мишка 4 (Ø2100)", callback_data="price_view_m4")
+    b5 = types.InlineKeyboardButton("🧱 Вставки в ж/б колодцы", callback_data="price_view_rings")
+    kb.add(b1, b2)
+    kb.add(b3, b4)
+    kb.add(b5)
+    return kb
 
 
 def get_extras_keyboard(chat_id, lang):
@@ -360,6 +456,37 @@ def get_extras_keyboard(chat_id, lang):
 
 def register_calc_handlers(bot):
 
+    # 1. Команда просмотра прайс-листа
+    @bot.message_handler(commands=['price', 'прайс'])
+    def handle_price_cmd(message):
+        bot.reply_to(
+            message,
+            "🏷 <b>Официальный прайс-лист продукции «МИШКА»:</b>\n\n"
+            "Выберите интересующую категорию кессонов или вставок:",
+            reply_markup=get_price_categories_keyboard(),
+            parse_mode="HTML"
+        )
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("price_view_"))
+    def handle_price_view(call):
+        cat = call.data.replace("price_view_", "")
+        bot.answer_callback_query(call.id)
+        text = PRICE_DATA.get(cat, "Раздел не найден.")
+        back_kb = types.InlineKeyboardMarkup()
+        back_kb.add(types.InlineKeyboardButton("⬅️ Назад ко всем моделям", callback_data="price_back_main"))
+        bot.send_message(call.message.chat.id, text, reply_markup=back_kb, parse_mode="HTML")
+
+    @bot.callback_query_handler(func=lambda call: call.data == "price_back_main")
+    def handle_price_back(call):
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            call.message.chat.id,
+            "🏷 <b>Прайс-лист «МИШКА»:</b>\nВыберите модель:",
+            reply_markup=get_price_categories_keyboard(),
+            parse_mode="HTML"
+        )
+
+    # 2. Калькулятор и сборка заказа
     @bot.message_handler(commands=['calc', 'smeta'])
     def start_calc(message):
         bot.reply_to(
