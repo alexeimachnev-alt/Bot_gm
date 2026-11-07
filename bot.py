@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from flask import Flask
 import requests
 import telebot
+from telebot import types as tele_types
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError
@@ -182,9 +183,9 @@ def send_long_message(chat_id: int, text: str, reply_to_id: int = None):
     for idx, part in enumerate(parts):
         try:
             if idx == 0 and reply_to_id:
-                bot.send_message(chat_id, part, reply_to_message_id=reply_to_id)
+                bot.send_message(chat_id, part, reply_to_message_id=reply_to_id, parse_mode="HTML")
             else:
-                bot.send_message(chat_id, part)
+                bot.send_message(chat_id, part, parse_mode="HTML")
             time.sleep(0.3)
         except Exception as e:
             print(f"Ошибка отправки: {e}")
@@ -215,6 +216,8 @@ def check_group_trigger(message, text: str) -> bool:
     is_called_by_name = any(name in lower_text for name in all_names)
 
     return is_private or is_mentioned or is_reply_to_bot or is_called_by_name
+
+# --- ФУТБОЛЬНЫЙ МОДУЛЬ ---
 
 def parse_football_query(query: str):
     moscow_tz = timezone(timedelta(hours=3))
@@ -269,7 +272,7 @@ def parse_football_query(query: str):
 
 def fetch_football_data(query: str = "") -> str:
     if not FOOTBALL_API_KEY:
-        return "[!] Переменная FOOTBALL_API_KEY не настроена на сервере Render."
+        return "[!] Переменная <code>FOOTBALL_API_KEY</code> не настроена на Render."
 
     target_date, date_label, league_id, matched_league_name = parse_football_query(query)
 
@@ -300,7 +303,7 @@ def fetch_football_data(query: str = "") -> str:
                 fixtures = res_live.json().get("response", [])
 
         if not fixtures:
-            return f"По запросу {title_suffix} матчей не найдено."
+            return f"Матчей по запросу {title_suffix} не найдено."
 
         raw_items = []
         for f in fixtures[:20]:
@@ -338,20 +341,64 @@ def fetch_football_data(query: str = "") -> str:
         )
 
         translated = generate_ai_response(translate_prompt)
-        return f"<b>ФУТБОЛ {title_suffix.upper()}:</b>\n\n{translated}"
+        return f"⚽ <b>ФУТБОЛ {title_suffix.upper()}:</b>\n\n{translated}"
 
     except Exception as e:
         return f"[!] Ошибка при запросе: {e}"
 
+def get_football_keyboard():
+    keyboard = tele_types.InlineKeyboardMarkup(row_width=2)
+    b_live = tele_types.InlineKeyboardButton("⚡️ Лайв сейчас", callback_data="fb_live")
+    b_rpl = tele_types.InlineKeyboardButton("🏆 РПЛ (Россия)", callback_data="fb_rpl")
+    b_apl = tele_types.InlineKeyboardButton("🏴󠁧󠁢󠁥󠁮󠁧󠁿 АПЛ (Англия)", callback_data="fb_apl")
+    b_laliga = tele_types.InlineKeyboardButton("🇪🇸 Ла Лига", callback_data="fb_laliga")
+    b_yesterday = tele_types.InlineKeyboardButton("📅 Вчера", callback_data="fb_yesterday")
+    b_tomorrow = tele_types.InlineKeyboardButton("📅 Завтра", callback_data="fb_tomorrow")
+    keyboard.add(b_live, b_rpl)
+    keyboard.add(b_apl, b_laliga)
+    keyboard.add(b_yesterday, b_tomorrow)
+    return keyboard
+
 @bot.message_handler(commands=['football', 'футбол', 'матчи', 'счет'])
 def handle_football_cmd(message):
-    bot.send_chat_action(message.chat.id, "typing")
-    text = message.text or ""
+    text = (message.text or "").strip()
     parts = text.split(maxsplit=1)
-    query = parts[1].strip() if len(parts) > 1 else ""
+    
+    # Если написали просто /football без параметров — выдаем интерактивные кнопки
+    if len(parts) == 1:
+        bot.reply_to(
+            message,
+            "⚽ <b>Футбольный центр:</b>\nВыберите интересующий турнир или день:",
+            reply_markup=get_football_keyboard(),
+            parse_mode="HTML"
+        )
+        return
 
+    # Если написали конкретный запрос (например, /football апл вчера)
+    bot.send_chat_action(message.chat.id, "typing")
+    query = parts[1].strip()
     result = fetch_football_data(query)
     bot.reply_to(message, result, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("fb_"))
+def handle_football_callback(call):
+    bot.answer_callback_query(call.id, text="Загружаю результаты матчей...")
+    bot.send_chat_action(call.message.chat.id, "typing")
+
+    mapping = {
+        "fb_live": "сегодня",
+        "fb_rpl": "рпл сегодня",
+        "fb_apl": "апл сегодня",
+        "fb_laliga": "ла лига сегодня",
+        "fb_yesterday": "вчера",
+        "fb_tomorrow": "завтра"
+    }
+    
+    query = mapping.get(call.data, "сегодня")
+    result = fetch_football_data(query)
+    bot.send_message(call.message.chat.id, result, parse_mode="HTML")
+
+# --- СВОДКИ СООБЩЕНИЙ ЧАТА ---
 
 def build_summary_from_messages(logs) -> str:
     user_messages = defaultdict(list)
@@ -445,11 +492,7 @@ def handle_mode_switch(message):
             message,
             f"Текущий режим чата: <b>{current.upper()}</b>\n\n"
             f"Доступные роли:\n{modes_list}\n\n"
-            f"Футбольные команды:\n"
-            f"- <code>/football</code> — лайв прямо сейчас\n"
-            f"- <code>/football рпл вчера</code> — прошедшие матчи\n"
-            f"- <code>/football апл завтра</code> — расписание на завтра\n"
-            f"- <code>/football испания 08.11.2026</code> — выбор конкретной даты",
+            f"Футбол: <code>/football</code> (откроет интерактивные кнопки)",
             parse_mode="HTML"
         )
         return
@@ -548,6 +591,17 @@ def handle_message(message):
         if len(daily_chat_logs[message.chat.id]) > 400:
             daily_chat_logs[message.chat.id].pop(0)
 
+    # Распознавание футбольных фраз в обычном тексте сообщения
+    lower_text = user_text.lower()
+    if any(word in lower_text for word in ["футбол", "матч", "сыграли", "счет"]):
+        bot.reply_to(
+            message,
+            "⚽ <b>Футбольный центр:</b>\nВыберите турнир или день:",
+            reply_markup=get_football_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+
     if not check_group_trigger(message, user_text):
         return
 
@@ -600,6 +654,19 @@ def handle_message(message):
     except Exception as e:
         send_long_message(message.chat.id, f"Ошибка при ответе: {e}", reply_to_id=message.message_id)
 
+def setup_bot_commands():
+    """Регистрирует команды в официальном выпадающем меню Telegram."""
+    commands = [
+        tele_types.BotCommand("football", "Матчи и счет (кнопки выбора)"),
+        tele_types.BotCommand("summary", "Смешной итог дня в чате"),
+        tele_types.BotCommand("mode", "Выбрать персонажа / режим"),
+        tele_types.BotCommand("summary_test", "Тест сводки со стендапом")
+    ]
+    try:
+        bot.set_my_commands(commands)
+    except Exception as e:
+        print(f"Ошибка установки команд меню: {e}")
+
 def run_telebot():
     print("Инициализация Telegram polling...")
     try:
@@ -608,6 +675,7 @@ def run_telebot():
     except Exception:
         pass
 
+    setup_bot_commands()
     print("Telegram polling запущен...")
     while True:
         try:
