@@ -1,102 +1,115 @@
 import os
-from telebot import types
+import telebot
 
-# Ваш ID зашит по умолчанию, также может читаться из переменных окружения
+# Ваш ID в Telegram
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "551209811"))
 
 user_calc_sessions = {}
 
 
-def calculate_estimate(data: dict) -> dict:
+def build_warehouse_checklist(data: dict) -> str:
+    """Формирует точный складской сборочный лист под параметры скважины."""
     depth = data["depth"]
     yield_flow = data["yield_flow"]
     houses = data["houses"]
     distance = data["distance"]
 
-    # 1. Расчёт глубины спуска и требуемого напора
+    # Инженерный расчёт
     pump_depth = max(10, int(depth - 5))
     total_pipe_run = pump_depth + distance
     friction_losses = total_pipe_run * 0.10
     required_head = int(pump_depth + friction_losses + 30 + 5)
 
-    # 2. Подбор класса насоса по напору
+    # 1. Насос
     if required_head <= 60:
-        pump_model = "Скважинный насос напор 60-70 м (3.0 м³/ч)"
-        pump_cost = 26000
+        pump_model = "Насос скважинный 3\"/4\" (напор 60-70 м, 2.5-3.0 м³/ч)"
     elif required_head <= 85:
-        pump_model = "Скважинный насос напор 80-90 м (3.5 м³/ч)"
-        pump_cost = 34000
+        pump_model = "Насос скважинный 3\"/4\" (напор 80-90 м, 3.0-3.5 м³/ч)"
     elif required_head <= 110:
-        pump_model = "Скважинный насос усиленный 100-115 м"
-        pump_cost = 45000
+        pump_model = "Насос скважинный усиленный (напор 100-115 м)"
     else:
-        pump_model = "Высоконапорный насос 120+ м / пром. серия"
-        pump_cost = 62000
+        pump_model = "Насос высоконапорный промышленной серии (напор 120+ м)"
 
-    # 3. Подбор гидробака под число точек/домов
+    # 2. Кессон
     if houses == 1:
-        tank_spec = "Гидроаккумулятор 80-100 л (нерж. фланец)"
-        tank_cost = 14000
+        kesson_name = "Кессон пластиковый «МИШКА-2» (1000х2000 мм)"
+        branch_tees = 1
+    else:
+        kesson_name = f"Кессон пластиковый «МИШКА-3» (увеличенный под гребёнку на {houses} вывода)"
+        branch_tees = houses
+
+    # 3. Гидробак
+    if houses == 1:
+        tank_spec = "Гидроаккумулятор 80-100 л (вертикальный, фланец нерж)"
     elif houses == 2:
-        tank_spec = "Гидроаккумулятор 150 л (или 2х80 л)"
-        tank_cost = 24000
+        tank_spec = "Гидроаккумулятор 150 л (или 2 шт. по 80-100 л)"
     else:
-        tank_spec = f"Гидроаккумулятор 200-300 л (на {houses} домов)"
-        tank_cost = 38000
+        tank_spec = f"Гидроаккумулятор 200-300 л (под {houses} домов)"
 
-    # 4. Метражи спуска и материалов
-    pipe_downhole_m = int(pump_depth * 1.1)
-    cable_downhole_m = int((pump_depth + 5) * 1.1)
-    rope_stainless_m = int(pump_depth + 6)
+    # Метражи
+    pnd_downhole = int(pump_depth * 1.05)
+    pnd_trench = int(distance * houses * 1.05)
+    total_pnd_pipe = pnd_downhole + pnd_trench + 5  # с запасом на подъёмы
+    cable_m = int((pump_depth + 5) * 1.1)
+    rope_m = int(pump_depth + 6)
+    cable_ties = max(40, int(pump_depth * 1.5))
+    insulation_m = int(distance * houses + 2)
 
-    # Смета водоподъема (ПНД 32 SDR11, нерж трос 4мм, кабель КВВ-П + оголовок и клапан)
-    downhole_materials = (pipe_downhole_m * 110) + (rope_stainless_m * 130) + (cable_downhole_m * 160) + 9500
-
-    # Трасса: траншея + труба ПНД 32 в энергофлексе (1200 руб/м)
-    total_trench_distance = int(distance * houses)
-    trench_cost = total_trench_distance * 1200
-
-    # Подбор кессона
-    if houses == 1:
-        kesson_name = "Кессон пластиковый «МИШКА-2» с обжимной муфтой"
-        kesson_cost = 48000
-    else:
-        kesson_name = "Кессон пластиковый «МИШКА-3» (увеличенный под гребёнку)"
-        kesson_cost = 58000
-
-    automation_kit_cost = tank_cost + 9000
-    total_sum = pump_cost + downhole_materials + trench_cost + kesson_cost + automation_kit_cost
-
-    return {
-        "pump_model": pump_model,
-        "pump_depth": pump_depth,
-        "required_head": required_head,
-        "tank_spec": tank_spec,
-        "kesson_name": kesson_name,
-        "pipe_downhole_m": pipe_downhole_m,
-        "rope_stainless_m": rope_stainless_m,
-        "total_distance": total_trench_distance,
-        "pump_cost": pump_cost,
-        "downhole_kit": downhole_materials,
-        "trench_cost": trench_cost,
-        "kesson_cost": kesson_cost,
-        "automation_cost": automation_kit_cost,
-        "total_sum": total_sum
-    }
+    # Собираем чек-лист склада
+    checklist = (
+        f"📦 <b>ЗАКАЗ НА СБОРКУ СКЛАДА (СБОРКА КОМПЛЕКТА)</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👷 <b>Монтажник:</b> {data['worker_name']} ({data['worker_tag']})\n"
+        f"🆔 ID чата: <code>{data['chat_id']}</code>\n\n"
+        f"📋 <b>Входные параметры объекта:</b>\n"
+        f"• Глубина скважины: <b>{depth} м</b> (подвеска насоса на {pump_depth} м)\n"
+        f"• Дебит: <b>{yield_flow} м³/ч</b> | Расчётный напор: <b>{required_head} м</b>\n"
+        f"• Подключение домов: <b>{houses} шт.</b>\n"
+        f"• Расстояние до объекта: <b>{distance} м</b>\n\n"
+        f"🛠 <b>СПИСОК НА ОТГРУЗКУ:</b>\n\n"
+        f"<b>1. Кессон и устье:</b>\n"
+        f"  ▫️ {kesson_name} — 1 шт.\n"
+        f"  ▫️ Муфта обсадной трубы герметичная (под обсадную) — 1 шт.\n"
+        f"  ▫️ Оголовок скважинный герметичный 125-133/32 — 1 шт.\n"
+        f"  ▫️ Гермовводы для ПНД 32 в кессон — {houses + 1} шт. (трасса + полив)\n\n"
+        f"<b>2. Спускной скважинный узел:</b>\n"
+        f"  ▫️ {pump_model} — 1 шт.\n"
+        f"  ▫️ Трос нержавеющий А2/А4 (Ø4 мм) — <b>{rope_m} м</b>\n"
+        f"  ▫️ Зажимы троса нержавеющие (дуплекс 4 мм) — 4 шт.\n"
+        f"  ▫️ Коуши нержавеющие 4 мм — 2 шт.\n"
+        f"  ▫️ Карабин нержавеющий 8 мм — 1 шт.\n"
+        f"  ▫️ Обратный клапан латунный 1\" (латунный шток) — 1 шт.\n"
+        f"  ▫️ Ниппель латунный 1\" НР-НР — 1 шт.\n"
+        f"  ▫️ Муфта латунная компрессионная ПНД 32 х 1\" НР — 1 шт.\n\n"
+        f"<b>3. Труба, кабель и расходка:</b>\n"
+        f"  ▫️ Труба питьевая ПНД PE-100 SDR11 Ø32 мм — <b>{total_pnd_pipe} м</b> (бухта)\n"
+        f"  ▫️ Кабель водопогружной КВВ-П 3х2.5 — <b>{cable_m} м</b>\n"
+        f"  ▫️ Муфта кабельная термоусадочная заливная/клеевая — 1 компл.\n"
+        f"  ▫️ Стяжки нейлоновые уличные (черные) — {cable_ties} шт.\n"
+        f"  ▫️ Утеплитель для ПНД 32 (энергофлекс 9-13 мм) — <b>{insulation_m} м</b>\n\n"
+        f"<b>4. Автоматика и обвязка:</b>\n"
+        f"  ▫️ {tank_spec} — 1 шт.\n"
+        f"  ▫️ Пятивыводной штуцер (пятерник) 1\" латунь — {branch_tees} шт.\n"
+        f"  ▫️ Реле давления (Italtecnica PM/5G или Турбипресс) — 1 шт.\n"
+        f"  ▫️ Манометр 0-6 бар (1/4\") — 1 шт.\n"
+        f"  ▫️ Фильтр магистральный BB10/BB20 (1\") с картриджем — 1 шт.\n"
+        f"  ▫️ Краны шаровые латунные 1\" (с американкой) — {2 * houses} шт.\n"
+        f"  ▫️ Кран летнего полива 3/4\" со штуцером — 1 шт.\n"
+        f"  ▫️ Греющий кабель саморегулирующийся (ввод в дом) — {houses * 2} м + муфты\n"
+    )
+    return checklist
 
 
 def register_calc_handlers(bot):
-    """Регистрирует цепочку шагов калькулятора."""
 
     @bot.message_handler(commands=['calc', 'smeta'])
     def start_calc(message):
         user_calc_sessions[message.chat.id] = {}
-        bot.send_message(
-            message.chat.id,
-            "💧 **Инженерный расчёт скважины с кессоном**\n\n"
-            "Ответьте на 4 вопроса для точного подбора оборудования и сметы.\n\n"
-            "1️⃣ **Какая глубина скважины в метрах?** (введите число, например: `40`):",
-            parse_mode="Markdown"
+        bot.reply_to(
+            message,
+            "🔧 <b>Параметры скважины для выдачи комплекта:</b>\n\n"
+            "1️⃣ <b>Глубина скважины (в метрах):</b>\n<i>(введите число, например: 40)</i>",
+            parse_mode="HTML"
         )
         bot.register_next_step_handler(message, lambda m: step_depth(m, bot))
 
@@ -108,15 +121,14 @@ def register_calc_handlers(bot):
             if val <= 0 or val > 300:
                 raise ValueError
             user_calc_sessions[message.chat.id]["depth"] = val
-            bot.send_message(
-                message.chat.id,
-                "2️⃣ **Какой дебит (производительность) скважины в м³/час?**\n"
-                "*(По паспорту скважины, либо укажите среднее: `2` или `3`)*:",
-                parse_mode="Markdown"
+            bot.reply_to(
+                message,
+                "2️⃣ <b>Дебит (производительность) скважины в м³/час:</b>\n<i>(если не знаешь точно — пиши 2 или 3)</i>",
+                parse_mode="HTML"
             )
             bot.register_next_step_handler(message, lambda m: step_yield(m, bot))
         except (ValueError, TypeError):
-            bot.send_message(message.chat.id, "⚠️ Укажите глубину числом (например: 40):")
+            bot.reply_to(message, "⚠️ Введи глубину числом (например: 40):")
             bot.register_next_step_handler(message, lambda m: step_depth(m, bot))
 
     def step_yield(message, bot):
@@ -127,14 +139,14 @@ def register_calc_handlers(bot):
             if val <= 0 or val > 50:
                 raise ValueError
             user_calc_sessions[message.chat.id]["yield_flow"] = val
-            bot.send_message(
-                message.chat.id,
-                "3️⃣ **Сколько домов / строений нужно подключить?** (число, например: `1`):",
-                parse_mode="Markdown"
+            bot.reply_to(
+                message,
+                "3️⃣ <b>Сколько строений (домов) подключаем?</b>\n<i>(введи число, например: 1)</i>",
+                parse_mode="HTML"
             )
             bot.register_next_step_handler(message, lambda m: step_houses(m, bot))
         except (ValueError, TypeError):
-            bot.send_message(message.chat.id, "⚠️ Укажите производительность числом (например: 2.5):")
+            bot.reply_to(message, "⚠️ Введи число дебита (например: 2.5):")
             bot.register_next_step_handler(message, lambda m: step_yield(m, bot))
 
     def step_houses(message, bot):
@@ -145,14 +157,14 @@ def register_calc_handlers(bot):
             if val < 1 or val > 10:
                 raise ValueError
             user_calc_sessions[message.chat.id]["houses"] = val
-            bot.send_message(
-                message.chat.id,
-                "4️⃣ **Какое расстояние от скважины до дома в метрах?** (например: `15`):",
-                parse_mode="Markdown"
+            bot.reply_to(
+                message,
+                "4️⃣ <b>Расстояние от скважины до дома (в метрах):</b>\n<i>(например: 15)</i>",
+                parse_mode="HTML"
             )
             bot.register_next_step_handler(message, lambda m: step_distance(m, bot))
         except (ValueError, TypeError):
-            bot.send_message(message.chat.id, "⚠️ Введите количество домов целым числом (например: 1):")
+            bot.reply_to(message, "⚠️ Введи количество домов целым числом (например: 1):")
             bot.register_next_step_handler(message, lambda m: step_houses(m, bot))
 
     def step_distance(message, bot):
@@ -164,88 +176,26 @@ def register_calc_handlers(bot):
                 raise ValueError
             user_calc_sessions[message.chat.id]["distance"] = val
 
-            markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
-            btn_phone = types.KeyboardButton(text="📱 Отправить контакт", request_contact=True)
-            markup.add(btn_phone)
+            data = user_calc_sessions.get(message.chat.id, {})
+            data["worker_tag"] = f"@{message.from_user.username}" if message.from_user.username else "нет username"
+            data["worker_name"] = f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}".strip() or "Монтажник"
+            data["chat_id"] = message.chat.id
 
-            bot.send_message(
-                message.chat.id,
-                "Все данные приняты! Нажмите кнопку ниже или отправьте номер телефона сообщением для получения сметы:",
-                reply_markup=markup
+            # 1. Ответ монтажнику в чат
+            bot.reply_to(
+                message,
+                "✅ <b>Спасибо! Запрос принят.</b>\n"
+                "Спецификация передана на склад, начинаем комплектовать заказ к вашему приезду.",
+                parse_mode="HTML"
             )
-            bot.register_next_step_handler(message, lambda m: step_contact(m, bot))
+
+            # 2. Формируем подробный сборочный лист и шлём вам в ЛС
+            checklist = build_warehouse_checklist(data)
+            try:
+                bot.send_message(ADMIN_CHAT_ID, checklist, parse_mode="HTML")
+            except Exception as e:
+                print(f"[ERROR] Не удалось отправить сборочный лист админу {ADMIN_CHAT_ID}: {e}")
+
         except (ValueError, TypeError):
-            bot.send_message(message.chat.id, "⚠️ Введите расстояние числом метров (например: 15):")
+            bot.reply_to(message, "⚠️ Введи расстояние числом метров (например: 15):")
             bot.register_next_step_handler(message, lambda m: step_distance(m, bot))
-
-    def step_contact(message, bot):
-        phone = ""
-        if message.contact:
-            phone = message.contact.phone_number
-        elif message.text:
-            phone = message.text.strip()
-        else:
-            phone = "Не указан"
-
-        data = user_calc_sessions.get(message.chat.id, {})
-        if not data:
-            bot.send_message(message.chat.id, "Сессия устарела. Наберите /calc заново.")
-            return
-
-        data["phone"] = phone
-        estimate = calculate_estimate(data)
-
-        client_username = f"@{message.from_user.username}" if message.from_user.username else "нет username"
-        client_name = f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}".strip()
-
-        # Полная смета инженеру (вам)
-        admin_report = (
-            f"🚨 **НОВАЯ ЗАЯВКА НА СМЕТУ СКВАЖИНЫ!**\n"
-            f"👤 Клиент: {client_name} ({client_username})\n"
-            f"📞 Телефон: `{phone}`\n"
-            f"🆔 ID: `{message.chat.id}`\n\n"
-            f"📋 **Входные данные:**\n"
-            f"• Глубина: {data['depth']} м (спуск насоса: ~{estimate['pump_depth']} м)\n"
-            f"• Дебит: {data['yield_flow']} м³/ч\n"
-            f"• Домов: {data['houses']} шт.\n"
-            f"• Трасса: {data['distance']} м (суммарно: {estimate['total_distance']} м)\n"
-            f"• Расчётный напор: **{estimate['required_head']} м**\n\n"
-            f"⚙️ **Подобранное оборудование:**\n"
-            f"• {estimate['kesson_name']}\n"
-            f"• {estimate['pump_model']}\n"
-            f"• {estimate['tank_spec']}\n"
-            f"• Труба ПНД 32 SDR11 в скважину: {estimate['pipe_downhole_m']} м\n"
-            f"• Трос нерж. 4 мм: {estimate['rope_stainless_m']} м\n\n"
-            f"💰 **Смета:**\n"
-            f"• Кессон: {estimate['kesson_cost']:,} руб.\n"
-            f"• Насос: {estimate['pump_cost']:,} руб.\n"
-            f"• Водоподъёмный узел: {estimate['downhole_kit']:,} руб.\n"
-            f"• Трасса водопровода: {estimate['trench_cost']:,} руб.\n"
-            f"• Автоматика: {estimate['automation_cost']:,} руб.\n"
-            f"──────────────\n"
-            f"🔥 **ИТОГО: {estimate['total_sum']:,} руб.**"
-        )
-
-        # Сообщение заказчику
-        client_message = (
-            f"✅ **Предварительный расчёт скважины готов!**\n\n"
-            f"• Глубина: **{data['depth']} м** (насос на глубине ~{estimate['pump_depth']} м)\n"
-            f"• Подключение: **{data['houses']} дом(а)**\n"
-            f"• Трасса водопровода: **{data['distance']} м**\n\n"
-            f"📦 **Комплект под ключ включает:**\n"
-            f"— {estimate['kesson_name']}\n"
-            f"— {estimate['pump_model']}\n"
-            f"— Питьевая труба ПНД 32 SDR11 + нержавеющий трос 4 мм\n"
-            f"— {estimate['tank_spec']} + реле, манометр и фильтрация\n"
-            f"— Земляные работы и прокладка утеплённой трассы до дома\n\n"
-            f"💵 Ориентировочная стоимость под ключ: **~{estimate['total_sum']:,} руб.**\n\n"
-            f"Инженер получил вашу спецификацию и свяжется с вами для согласования деталей!"
-        )
-
-        remove_markup = types.ReplyKeyboardRemove()
-        bot.send_message(message.chat.id, client_message, parse_mode="Markdown", reply_markup=remove_markup)
-
-        try:
-            bot.send_message(ADMIN_CHAT_ID, admin_report, parse_mode="Markdown")
-        except Exception as e:
-            print(f"[ERROR] Не удалось отправить смету админу {ADMIN_CHAT_ID}: {e}")
