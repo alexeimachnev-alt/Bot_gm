@@ -126,11 +126,12 @@ BREVITY_RULE = (
 )
 
 def get_candidate_models():
+    # Модели с высоким бесплатным суточным лимитом идут первыми
     return [
         "gemini-2.0-flash",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-flash-latest"
+        "gemini-2.0-flash-lite",
+        "gemini-1.5-flash",
+        "gemini-2.5-flash"
     ]
 
 def generate_ai_response(contents_payload) -> str:
@@ -138,28 +139,24 @@ def generate_ai_response(contents_payload) -> str:
     last_error = None
 
     for model_name in models:
-        for attempt in range(2):
-            try:
-                response = ai_client.models.generate_content(
-                    model=model_name,
-                    contents=contents_payload,
-                )
-                if response.text:
-                    return response.text
-            except APIError as e:
-                last_error = e
-                if e.code in [503, 429]:
-                    time.sleep(1.2)
-                    continue
-                elif e.code == 404:
-                    break
-                break
-            except Exception as e:
-                last_error = e
-                time.sleep(1)
-                break
+        try:
+            response = ai_client.models.generate_content(
+                model=model_name,
+                contents=contents_payload,
+            )
+            if response.text:
+                return response.text
+        except APIError as e:
+            last_error = e
+            # 429 (исчерпан лимит дня) или 503 (сервер перегружен) — сразу берем другую модель
+            if e.code in [429, 503, 404]:
+                continue
+            break
+        except Exception as e:
+            last_error = e
+            continue
 
-    raise last_error or Exception("Серверы нейросети временно перегружены. Попробуйте снова через минуту.")
+    raise last_error or Exception("Серверы нейросети временно заняты. Попробуйте написать через минуту.")
 
 def send_long_message(chat_id: int, text: str, reply_to_id: int = None):
     if not text:
@@ -399,7 +396,7 @@ def handle_photo(message):
         reply_text = generate_ai_response([image_part, final_prompt])
         send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        send_long_message(message.chat.id, f"Ошибка при анализе фото: {e}", reply_to_id=message.message_id)
+        send_long_message(message.chat.id, "Нейросеть сейчас обрабатывает много запросов. Попробуйте отправить фото еще раз через минуту.", reply_to_id=message.message_id)
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -465,7 +462,7 @@ def handle_message(message):
         reply_text = generate_ai_response(final_prompt)
         send_long_message(message.chat.id, reply_text, reply_to_id=message.message_id)
     except Exception as e:
-        send_long_message(message.chat.id, f"Ошибка при ответе: {e}", reply_to_id=message.message_id)
+        send_long_message(message.chat.id, "Серверы Gemini временно загружены. Попробуйте повторить вопрос через полминуты.", reply_to_id=message.message_id)
 
 def setup_bot_commands():
     commands = [
